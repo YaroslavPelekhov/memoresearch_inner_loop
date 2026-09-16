@@ -19,7 +19,12 @@ Connect through the shared-account isolation wrapper:
 ```bash
 ssh -t bulatov@135.106.168.25 /home/bulatov/.guest-zsh/login
 cd /home/bulatov/yaroslav-multifidelity/repo
+source config/server/euler-yaroslav-multifidelity.env
 ```
+
+Sourcing the runtime profile also redirects subsequent interactive Zsh history
+to `/home/bulatov/yaroslav-multifidelity/.zsh_history`. Commands entered before
+that remain in the administrator-provided guest history file.
 
 Validate both lanes without starting them:
 
