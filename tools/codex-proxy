@@ -6,9 +6,15 @@ set -euo pipefail
 proxy_home="${AUTORESEARCH_PROXY_HOME:-${HOME}/.local/share/autoresearch-proxy}"
 codex_bin="${AUTORESEARCH_CODEX_BIN:-${HOME}/.local/bin/codex}"
 xray_bin="${proxy_home}/xray"
-xray_config="${proxy_home}/vless-mlpc.json"
+xray_config="${AUTORESEARCH_XRAY_CONFIG:-${proxy_home}/vless-mlpc.json}"
 gost_bin="${proxy_home}/gost-linux-amd64-2.11.5"
-proxy_url="${AUTORESEARCH_CODEX_PROXY:-http://127.0.0.1:1081}"
+socks_host="${AUTORESEARCH_PROXY_SOCKS_HOST:-127.0.0.1}"
+socks_port="${AUTORESEARCH_PROXY_SOCKS_PORT:-1080}"
+http_host="${AUTORESEARCH_PROXY_HTTP_HOST:-127.0.0.1}"
+http_port="${AUTORESEARCH_PROXY_HTTP_PORT:-1081}"
+proxy_url="${AUTORESEARCH_CODEX_PROXY:-http://${http_host}:${http_port}}"
+xray_pidfile="${proxy_home}/xray.pid"
+gost_pidfile="${proxy_home}/gost.pid"
 
 require_file() {
     if [[ ! -e "$1" ]]; then
@@ -24,30 +30,59 @@ require_file "$gost_bin"
 
 mkdir -p "$proxy_home"
 
-if ! ss -ltn | grep -q '127.0.0.1:1080'; then
+port_is_listening() {
+    local host="$1" port="$2"
+    ss -H -ltnp 2>/dev/null | awk -v endpoint="${host}:${port}" -v port="$port" \
+        '$4 == endpoint || $4 ~ (":" port "$") { found=1 } END { exit !found }'
+}
+
+listener_is_ours() {
+    local host="$1" port="$2" pidfile="$3"
+    [[ -f "$pidfile" ]] || return 1
+    local pid
+    pid="$(tr -cd '0-9' <"$pidfile")"
+    [[ -n "$pid" && -r "/proc/${pid}/cmdline" ]] || return 1
+    tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -Fq -- "$proxy_home" || return 1
+    ss -H -ltnp 2>/dev/null | grep -E "[:.]${port}[[:space:]].*pid=${pid}," >/dev/null
+}
+
+ensure_available_or_owned() {
+    local label="$1" host="$2" port="$3" pidfile="$4"
+    if port_is_listening "$host" "$port" && ! listener_is_ours "$host" "$port" "$pidfile"; then
+        echo "Refusing to reuse ${label} listener outside $proxy_home: ${host}:${port}" >&2
+        exit 5
+    fi
+}
+
+ensure_available_or_owned "SOCKS proxy" "$socks_host" "$socks_port" "$xray_pidfile"
+ensure_available_or_owned "HTTP proxy" "$http_host" "$http_port" "$gost_pidfile"
+
+if ! port_is_listening "$socks_host" "$socks_port"; then
     nohup "$xray_bin" run -c "$xray_config" \
         >>"${proxy_home}/xray.log" 2>&1 &
+    echo "$!" >"$xray_pidfile"
 fi
 
 for _ in {1..50}; do
-    ss -ltn | grep -q '127.0.0.1:1080' && break
+    port_is_listening "$socks_host" "$socks_port" && break
     sleep 0.1
 done
-if ! ss -ltn | grep -q '127.0.0.1:1080'; then
+if ! port_is_listening "$socks_host" "$socks_port"; then
     echo "Codex proxy SOCKS listener did not start; see ${proxy_home}/xray.log" >&2
     exit 3
 fi
 
-if ! ss -ltn | grep -q '127.0.0.1:1081'; then
-    nohup "$gost_bin" -L http://127.0.0.1:1081 \
-        -F socks5://127.0.0.1:1080 >>"${proxy_home}/gost.log" 2>&1 &
+if ! port_is_listening "$http_host" "$http_port"; then
+    nohup "$gost_bin" -L "http://${http_host}:${http_port}" \
+        -F "socks5://${socks_host}:${socks_port}" >>"${proxy_home}/gost.log" 2>&1 &
+    echo "$!" >"$gost_pidfile"
 fi
 
 for _ in {1..50}; do
-    ss -ltn | grep -q '127.0.0.1:1081' && break
+    port_is_listening "$http_host" "$http_port" && break
     sleep 0.1
 done
-if ! ss -ltn | grep -q '127.0.0.1:1081'; then
+if ! port_is_listening "$http_host" "$http_port"; then
     echo "Codex HTTP proxy listener did not start; see ${proxy_home}/gost.log" >&2
     exit 4
 fi

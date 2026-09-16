@@ -329,6 +329,17 @@ def test_sync_min_delta_decoupled_from_max_mutations():
         )
 
 
+def test_redis_endpoint_can_be_isolated_by_environment(monkeypatch):
+    monkeypatch.setenv("REDIS_HOST", "127.0.0.1")
+    monkeypatch.setenv("REDIS_PORT", "16379")
+
+    cfg = _compose()
+
+    assert cfg.redis.host == "127.0.0.1"
+    assert cfg.redis.port == 16379
+    assert cfg.redis_storage.config.redis_url == "redis://127.0.0.1:16379/0"
+
+
 def test_redis_prefix_controls_current_run_namespace():
     """${redis.prefix} must control run-local Redis namespaces.
 

@@ -2,8 +2,10 @@
 
 # Redis connection parameters
 redis:
-  host: localhost
-  port: 6379
+  # Environment overrides let shared-user deployments select a private Redis
+  # instance without changing every experiment invocation.
+  host: ${oc.env:REDIS_HOST,localhost}
+  port: ${oc.decode:${oc.env:REDIS_PORT,6379}}
   db: 0
   resume: false
   # Namespace for this run's Redis keys. Defaults to ${problem.name}. Override

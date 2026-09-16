@@ -109,6 +109,56 @@ for path in "${required_paths[@]}"; do
     fi
 done
 
+assert_port_private() {
+    local label="$1" host="$2" port="$3" pidfile="$4" owner_root="$5"
+    local listener
+    listener="$(ss -H -ltnp 2>/dev/null | awk -v endpoint="${host}:${port}" -v port="$port" \
+        '$4 == endpoint || $4 ~ (":" port "$") { print; exit }')"
+    [[ -z "$listener" ]] && return 0
+    if [[ ! -f "$pidfile" ]]; then
+        echo "$label port is occupied without our PID file: ${host}:${port}" >&2
+        exit 8
+    fi
+    local pid
+    pid="$(tr -cd '0-9' <"$pidfile")"
+    if [[ -z "$pid" || ! -r "/proc/${pid}/cmdline" ]] \
+        || ! tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -Fq -- "$owner_root" \
+        || [[ "$listener" != *"pid=${pid},"* ]]; then
+        echo "$label port is occupied by a process outside $owner_root: ${host}:${port}" >&2
+        exit 8
+    fi
+}
+
+assert_port_private "Redis" "$AUTORESEARCH_REDIS_HOST" "$AUTORESEARCH_REDIS_PORT" \
+    "$AUTORESEARCH_REDIS_DIR/redis.pid" "$AUTORESEARCH_REDIS_DIR"
+assert_port_private "SOCKS proxy" "$AUTORESEARCH_PROXY_SOCKS_HOST" \
+    "$AUTORESEARCH_PROXY_SOCKS_PORT" "$AUTORESEARCH_PROXY_HOME/xray.pid" \
+    "$AUTORESEARCH_PROXY_HOME"
+assert_port_private "HTTP proxy" "$AUTORESEARCH_PROXY_HTTP_HOST" \
+    "$AUTORESEARCH_PROXY_HTTP_PORT" "$AUTORESEARCH_PROXY_HOME/gost.pid" \
+    "$AUTORESEARCH_PROXY_HOME"
+
+if ! "$AUTORESEARCH_PYTHON" - "$AUTORESEARCH_PROXY_HOME/vless-mlpc.json" \
+    "$AUTORESEARCH_PROXY_SOCKS_HOST" "$AUTORESEARCH_PROXY_SOCKS_PORT" <<'PY'
+import json
+import sys
+
+config_path, expected_host, expected_port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(config_path, encoding="utf-8") as handle:
+    config = json.load(handle)
+matches = [
+    inbound
+    for inbound in config.get("inbounds", [])
+    if inbound.get("port") == expected_port
+    and inbound.get("listen") in {expected_host, "localhost"}
+]
+raise SystemExit(0 if matches else 1)
+PY
+then
+    echo "Xray config must listen only on ${AUTORESEARCH_PROXY_SOCKS_HOST}:${AUTORESEARCH_PROXY_SOCKS_PORT}" >&2
+    exit 8
+fi
+
 if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
     echo "Refusing to use a dirty source checkout: $repo_root" >&2
     exit 4

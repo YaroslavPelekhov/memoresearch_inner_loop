@@ -4,6 +4,12 @@ The isolated workspace is `/home/bulatov/yaroslav-multifidelity`. Code, conda
 environment, DCLM train/heldout data, CORE fixtures, Codex state, run outputs,
 and logs live below that directory.
 
+The runtime also avoids shared-user service state: Redis uses the private
+directory `redis/` and loopback port `16379`; the Codex SOCKS/HTTP proxy uses
+loopback ports `11880`/`11881`, with binaries, configuration, PID files, and
+logs under `proxy/`. The launcher refuses an occupied port unless its PID file
+and process command both resolve to this workspace.
+
 Connect through the shared-account isolation wrapper:
 
 ```bash

@@ -7,9 +7,28 @@ redis_host="${AUTORESEARCH_REDIS_HOST:-127.0.0.1}"
 redis_port="${AUTORESEARCH_REDIS_PORT:-6379}"
 redis_dir="${AUTORESEARCH_REDIS_DIR:-${HOME}/.local/share/autoresearch-redis}"
 python_bin="${AUTORESEARCH_PYTHON:-python}"
+pidfile="${redis_dir}/redis.pid"
 
-if ss -ltn | grep -q "${redis_host}:${redis_port}"; then
-    exit 0
+port_is_listening() {
+    ss -H -ltnp 2>/dev/null | awk -v endpoint="${redis_host}:${redis_port}" \
+        '$4 == endpoint || $4 ~ (":" substr(endpoint, index(endpoint, ":") + 1) "$") { found=1 } END { exit !found }'
+}
+
+listener_is_ours() {
+    [[ -f "$pidfile" ]] || return 1
+    local pid
+    pid="$(tr -cd '0-9' <"$pidfile")"
+    [[ -n "$pid" && -r "/proc/${pid}/cmdline" ]] || return 1
+    tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -Fq -- "$redis_dir" || return 1
+    ss -H -ltnp 2>/dev/null | grep -E "[:.]${redis_port}[[:space:]].*pid=${pid}," >/dev/null
+}
+
+if port_is_listening; then
+    if listener_is_ours; then
+        exit 0
+    fi
+    echo "Refusing to reuse Redis listener outside $redis_dir: ${redis_host}:${redis_port}" >&2
+    exit 4
 fi
 
 redis_server="${AUTORESEARCH_REDIS_SERVER:-}"
@@ -33,7 +52,7 @@ mkdir -p "$redis_dir"
     --daemonize yes \
     --dir "$redis_dir" \
     --dbfilename state.rdb \
-    --pidfile "$redis_dir/redis.pid" \
+    --pidfile "$pidfile" \
     --logfile "$redis_dir/redis.log"
 
 for _ in {1..50}; do
