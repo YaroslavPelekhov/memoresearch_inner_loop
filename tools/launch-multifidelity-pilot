@@ -113,13 +113,17 @@ if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
     echo "Refusing to use a dirty source checkout: $repo_root" >&2
     exit 4
 fi
-if ! timeout 10 "$AUTORESEARCH_CODEX_BIN" --version >/dev/null; then
-    echo "Codex runtime is unavailable: $AUTORESEARCH_CODEX_BIN" >&2
+if [[ ! -x "$AUTORESEARCH_CODEX_BIN" ]]; then
+    echo "Codex runtime is not executable: $AUTORESEARCH_CODEX_BIN" >&2
     exit 5
 fi
 
-gpu_state="$(nvidia-smi --query-gpu=index,memory.used,utilization.gpu \
-    --format=csv,noheader,nounits -i "$gpu_index")"
+if ! gpu_state="$(timeout 20 nvidia-smi \
+    --query-gpu=index,memory.used,utilization.gpu \
+    --format=csv,noheader,nounits -i "$gpu_index")"; then
+    echo "Could not query GPU $gpu_index within 20 seconds" >&2
+    exit 6
+fi
 IFS=',' read -r observed_index memory_used utilization <<<"$gpu_state"
 observed_index="${observed_index//[[:space:]]/}"
 memory_used="${memory_used//[[:space:]]/}"
