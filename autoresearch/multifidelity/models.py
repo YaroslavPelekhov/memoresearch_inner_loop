@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -41,6 +41,7 @@ class MultiFidelityPlan(StrictModel):
     schedule_reference_batches: int = Field(ge=1)
     observe_only: bool = True
     calibrated: bool = False
+    confidence_method: Literal["exact_clopper_pearson"] = "exact_clopper_pearson"
     winner_recall_floor: float = Field(default=0.95, gt=0.0, le=1.0)
     confidence_level: float = Field(default=0.95, gt=0.0, lt=1.0)
     rungs: list[FidelityRung] = Field(min_length=2)

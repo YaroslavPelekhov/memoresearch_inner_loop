@@ -4,6 +4,7 @@ version: 1
 # trajectories. Setting observe_only=false is rejected unless calibrated=true.
 observe_only: true
 calibrated: false
+confidence_method: exact_clopper_pearson
 winner_recall_floor: 0.95
 confidence_level: 0.95
 

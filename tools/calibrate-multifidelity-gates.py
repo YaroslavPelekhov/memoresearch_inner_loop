@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import json
 from pathlib import Path
 import sys
@@ -22,8 +23,12 @@ from autoresearch.multifidelity.calibration import (
 from autoresearch.multifidelity.models import MultiFidelityPlan
 
 
-def _records(path: Path) -> dict[int, list[LabeledProbability]]:
+def _records(
+    path: Path, *, expected_split: str
+) -> tuple[dict[int, list[LabeledProbability]], set[str]]:
     grouped: dict[int, list[LabeledProbability]] = {}
+    group_ids: set[str] = set()
+    seen: set[tuple[str, int]] = set()
     with path.open(encoding="utf-8") as stream:
         for line_number, line in enumerate(stream, start=1):
             if not line.strip():
@@ -35,6 +40,9 @@ def _records(path: Path) -> dict[int, list[LabeledProbability]]:
                 lower = float(value.get("probability_lower", probability))
                 upper = float(value.get("probability_upper", probability))
                 winner = value["eventual_winner"]
+                split = str(value["split"])
+                run_id = str(value["run_id"])
+                group_id = str(value["group_id"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError(f"invalid record on line {line_number}") from exc
             if not isinstance(winner, bool):
@@ -43,10 +51,20 @@ def _records(path: Path) -> dict[int, list[LabeledProbability]]:
                 )
             if not 0.0 <= lower <= probability <= upper <= 1.0:
                 raise ValueError(f"probability out of range on line {line_number}")
+            if split != expected_split:
+                raise ValueError(
+                    f"line {line_number} belongs to split {split!r}, "
+                    f"expected {expected_split!r}"
+                )
+            key = (run_id, budget)
+            if key in seen:
+                raise ValueError(f"duplicate run/budget on line {line_number}: {key}")
+            seen.add(key)
+            group_ids.add(group_id)
             grouped.setdefault(budget, []).append(
                 LabeledProbability(probability, winner, lower=lower, upper=upper)
             )
-    return grouped
+    return grouped, group_ids
 
 
 def _conservative_monotone_gates(
@@ -89,11 +107,15 @@ def main() -> int:
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--records", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--expected-split", default="policy_selection")
     parser.add_argument("--promotion-precision-floor", type=float, default=0.80)
     args = parser.parse_args()
 
     plan = MultiFidelityPlan.from_yaml(args.plan)
-    grouped = _records(args.records)
+    grouped, group_ids = _records(
+        args.records,
+        expected_split=args.expected_split,
+    )
     calibration_rungs = plan.rungs[:-1]
     missing = [
         rung.budget_batches
@@ -140,10 +162,32 @@ def main() -> int:
         yaml.safe_dump(calibrated.model_dump(mode="json"), sort_keys=False),
         encoding="utf-8",
     )
+    evidence_path = args.output.with_suffix(".calibration.json")
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "records": str(args.records.resolve()),
+                "records_sha256": sha256(args.records.read_bytes()).hexdigest(),
+                "expected_split": args.expected_split,
+                "groups": len(group_ids),
+                "confidence_method": plan.confidence_method,
+                "confidence_level": plan.confidence_level,
+                "winner_recall_floor": plan.winner_recall_floor,
+                "kill_gates": [result.__dict__ for result in kill_results],
+                "promote_gates": [result.__dict__ for result in promote_results],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     print(
         json.dumps(
             {
                 "output": str(args.output),
+                "calibration_evidence": str(evidence_path),
                 "observe_only": True,
                 "budgets": [rung.budget_batches for rung in calibrated.rungs],
             },

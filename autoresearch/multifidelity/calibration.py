@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
-from statistics import NormalDist
+
+from autoresearch.multifidelity.statistics import clopper_pearson_lower
 
 
 @dataclass(frozen=True)
@@ -22,25 +22,6 @@ class CalibratedGate:
     trials: int
     observed_rate: float
     lower_confidence_bound: float
-
-
-def wilson_lower_bound(successes: int, trials: int, confidence: float) -> float:
-    """One-sided Wilson lower bound for a Bernoulli rate."""
-
-    if not 0.0 < confidence < 1.0:
-        raise ValueError("confidence must lie in (0, 1)")
-    if not 0 <= successes <= trials:
-        raise ValueError("successes must lie in [0, trials]")
-    if trials == 0:
-        return 0.0
-    z = NormalDist().inv_cdf(confidence)
-    rate = successes / trials
-    denominator = 1.0 + z * z / trials
-    center = rate + z * z / (2.0 * trials)
-    radius = z * math.sqrt(
-        rate * (1.0 - rate) / trials + z * z / (4.0 * trials * trials)
-    )
-    return (center - radius) / denominator
 
 
 def calibrate_kill_gate(
@@ -66,7 +47,7 @@ def calibrate_kill_gate(
     safe: list[CalibratedGate] = []
     for threshold in candidates:
         retained = sum(score >= threshold for score in winner_scores)
-        lower = wilson_lower_bound(retained, len(winners), confidence)
+        lower = clopper_pearson_lower(retained, len(winners), confidence)
         if lower >= recall_floor:
             safe.append(
                 CalibratedGate(
@@ -78,7 +59,7 @@ def calibrate_kill_gate(
                 )
             )
     if not safe:
-        lower = wilson_lower_bound(len(winners), len(winners), confidence)
+        lower = clopper_pearson_lower(len(winners), len(winners), confidence)
         raise ValueError(
             "insufficient winners to certify the recall floor: "
             f"best lower bound is {lower:.6f}"
@@ -107,7 +88,7 @@ def calibrate_promote_gate(
             if score > threshold
         ]
         successes = sum(record.eventual_winner for record in promoted)
-        lower = wilson_lower_bound(successes, len(promoted), confidence)
+        lower = clopper_pearson_lower(successes, len(promoted), confidence)
         if promoted and lower >= precision_floor:
             safe.append(
                 CalibratedGate(

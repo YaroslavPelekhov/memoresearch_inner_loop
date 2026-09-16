@@ -24,6 +24,16 @@ from autoresearch.multifidelity.state import load_observations, save_observation
 STRUCTURED_FEEDBACK_MARKER = "[gigaevo] structured feedback:"
 
 
+def _resume_promoted_run_at_final(
+    observations: list[RungObservation], *, final_budget: int
+) -> bool:
+    return bool(
+        observations
+        and observations[-1].budget_batches != final_budget
+        and observations[-1].decision.executed == Decision.PROMOTE
+    )
+
+
 def _last_json_object(text: str) -> dict[str, Any]:
     for line in reversed(text.splitlines()):
         try:
@@ -214,9 +224,16 @@ def main() -> int:
         None,
     )
     policy = ShrinkingGatePolicy(observe_only=plan.observe_only)
+    final_index = len(plan.rungs) - 1
+    promoted_to_final = _resume_promoted_run_at_final(
+        observations,
+        final_budget=plan.rungs[-1].budget_batches,
+    )
 
     for index, rung in enumerate(plan.rungs):
         if rung.budget_batches in completed_budgets:
+            continue
+        if promoted_to_final and index != final_index:
             continue
         main_dir = run_dir / "main" / f"budget-{rung.budget_batches}"
         checkpoint_dir = main_dir / "checkpoints"
@@ -298,7 +315,7 @@ def main() -> int:
         decision = policy.decide(
             estimate,
             rung,
-            final_rung=index == len(plan.rungs) - 1,
+            final_rung=index == final_index,
         )
         clean_main_metrics = _finite_metrics(main_metrics)
         clean_main_metrics["fitness"] = main_fitness
@@ -346,6 +363,8 @@ def main() -> int:
                 },
             )
             return 0
+        if decision.executed == Decision.PROMOTE and index != final_index:
+            promoted_to_final = True
 
     final = observations[-1]
     final_metrics = dict(final.main_metrics)
@@ -360,6 +379,7 @@ def main() -> int:
             "observe_only": plan.observe_only,
             "trajectory": str(state_path),
             "rungs_completed": len(observations),
+            "budgets_completed": [item.budget_batches for item in observations],
         },
     )
     return 0
