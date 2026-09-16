@@ -145,7 +145,15 @@ def main() -> int:
         [result.threshold for result in kill_results],
         [result.threshold for result in promote_results],
     )
-    kills, promotes = _widen_to_shrinking_widths(kills, promotes)
+    final_gate = plan.rungs[-1]
+    kills = [min(value, final_gate.kill_gate) for value in kills]
+    promotes = [max(value, final_gate.promote_gate) for value in promotes]
+    all_kills, all_promotes = _widen_to_shrinking_widths(
+        [*kills, final_gate.kill_gate],
+        [*promotes, final_gate.promote_gate],
+    )
+    kills = all_kills[:-1]
+    promotes = all_promotes[:-1]
 
     value = plan.model_dump(mode="json")
     value["calibrated"] = True
@@ -169,6 +177,8 @@ def main() -> int:
                 "version": 1,
                 "records": str(args.records.resolve()),
                 "records_sha256": sha256(args.records.read_bytes()).hexdigest(),
+                "calibrated_plan": str(args.output.resolve()),
+                "calibrated_plan_sha256": sha256(args.output.read_bytes()).hexdigest(),
                 "expected_split": args.expected_split,
                 "groups": len(group_ids),
                 "confidence_method": plan.confidence_method,
@@ -176,6 +186,14 @@ def main() -> int:
                 "winner_recall_floor": plan.winner_recall_floor,
                 "kill_gates": [result.__dict__ for result in kill_results],
                 "promote_gates": [result.__dict__ for result in promote_results],
+                "applied_gates": [
+                    {
+                        "budget_batches": rung.budget_batches,
+                        "kill_gate": rung.kill_gate,
+                        "promote_gate": rung.promote_gate,
+                    }
+                    for rung in calibrated.rungs
+                ],
             },
             indent=2,
             sort_keys=True,

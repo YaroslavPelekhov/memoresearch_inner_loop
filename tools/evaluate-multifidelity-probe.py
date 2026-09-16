@@ -23,6 +23,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predictions", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--budget", type=int, required=True)
     parser.add_argument("--confidence", type=float, default=0.95)
     parser.add_argument("--bootstrap-resamples", type=int, default=10_000)
     parser.add_argument("--bootstrap-seed", type=int, default=17)
@@ -39,6 +40,8 @@ def main() -> int:
                 raise ValueError(
                     f"line {line_number} is not from the locked_test split"
                 )
+            if int(value["budget_batches"]) != args.budget:
+                continue
             records.append(
                 ProbePredictionOutcome(
                     run_id=str(value["run_id"]),
@@ -60,6 +63,7 @@ def main() -> int:
         "version": 1,
         "locked_test_predictions": str(args.predictions.resolve()),
         "locked_test_sha256": sha256(args.predictions.read_bytes()).hexdigest(),
+        "budget_batches": args.budget,
         **result,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -117,10 +117,7 @@ def evaluate_locked_policy(
     if len({record.run_id for record in records}) != len(records):
         raise ValueError("locked test contains duplicate run ids")
     if any(
-        record.full_compute <= 0.0
-        or record.cascade_compute < 0.0
-        or record.cascade_compute > record.full_compute
-        for record in records
+        record.full_compute <= 0.0 or record.cascade_compute < 0.0 for record in records
     ):
         raise ValueError("compute values are outside the admissible range")
 

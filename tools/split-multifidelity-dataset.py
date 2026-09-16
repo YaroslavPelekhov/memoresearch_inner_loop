@@ -103,7 +103,14 @@ def main() -> int:
             "frozen_fitness_threshold": threshold,
         },
         "split_sha256": hashes,
-        "summary": split_summary(labeled),
+        "summary": {
+            name: (
+                summary
+                if name != "locked_test"
+                else {key: value for key, value in summary.items() if key != "winners"}
+            )
+            for name, summary in split_summary(labeled).items()
+        },
         "group_assignments": assignments,
     }
     manifest_path = args.output_dir / "split-manifest.json"

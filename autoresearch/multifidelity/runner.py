@@ -166,8 +166,14 @@ def main() -> int:
         else None
     )
     if not plan.observe_only:
-        if probability_model is None or not probability_model.calibrated:
-            raise ValueError("active pruning requires a calibrated probability model")
+        if (
+            probability_model is None
+            or not probability_model.calibrated
+            or not probability_model.frozen
+        ):
+            raise ValueError(
+                "active pruning requires a calibrated, frozen probability model"
+            )
 
     run_dir = args.run_dir.resolve()
     state_path = run_dir / "multifidelity-trajectory.json"
