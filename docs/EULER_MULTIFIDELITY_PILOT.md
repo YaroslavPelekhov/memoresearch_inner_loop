@@ -10,6 +10,10 @@ loopback ports `11880`/`11881`, with binaries, configuration, PID files, and
 logs under `proxy/`. The launcher refuses an occupied port unless its PID file
 and process command both resolve to this workspace.
 
+The pilot uses `runtime/tmux.sock` instead of the shared user's default tmux
+socket. XDG, HuggingFace, Torch, Triton, CUDA, pip, Matplotlib, and temporary
+file locations are also redirected below the isolated workspace.
+
 Connect through the shared-account isolation wrapper:
 
 ```bash
@@ -48,7 +52,7 @@ tools/launch-multifidelity-pilot \
 Inspect without changing state:
 
 ```bash
-tmux ls
+tmux -S /home/bulatov/yaroslav-multifidelity/runtime/tmux.sock ls
 tail -f /home/bulatov/yaroslav-multifidelity/logs/multifidelity-pilot-gpu0.log
 nvidia-smi
 ```
