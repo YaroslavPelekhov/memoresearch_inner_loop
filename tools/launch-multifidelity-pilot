@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Validate or explicitly start one isolated multi-fidelity pilot lane.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+workspace_root="${AUTORESEARCH_WORKSPACE_ROOT:-$(dirname "$repo_root")}"
+runtime_env="${AUTORESEARCH_RUNTIME_ENV:-$repo_root/config/server/euler-yaroslav-multifidelity.env}"
+gpu_index=""
+campaign_name=""
+target_rounds="${AUTORESEARCH_PILOT_TARGET_ROUNDS:-4}"
+evolution_generations="${AUTORESEARCH_PILOT_EVOLUTION_GENERATIONS:-4}"
+start=false
+
+usage() {
+    cat <<'EOF'
+Usage: tools/launch-multifidelity-pilot --gpu 0|1 [options]
+
+Options:
+  --campaign NAME          Default: multifidelity-pilot-gpu<GPU>
+  --target-rounds N        Default: 4
+  --evolution-generations N  Default: 4
+  --runtime-env PATH       Runtime environment file
+  --start                  Start the tmux lane; without this flag only validate
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --gpu)
+            gpu_index="$2"
+            shift 2
+            ;;
+        --campaign)
+            campaign_name="$2"
+            shift 2
+            ;;
+        --target-rounds)
+            target_rounds="$2"
+            shift 2
+            ;;
+        --evolution-generations)
+            evolution_generations="$2"
+            shift 2
+            ;;
+        --runtime-env)
+            runtime_env="$2"
+            shift 2
+            ;;
+        --start)
+            start=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ "$gpu_index" != "0" && "$gpu_index" != "1" ]]; then
+    echo "--gpu must be 0 or 1" >&2
+    exit 2
+fi
+if ! [[ "$target_rounds" =~ ^[1-9][0-9]*$ ]]; then
+    echo "--target-rounds must be positive" >&2
+    exit 2
+fi
+if ! [[ "$evolution_generations" =~ ^[1-9][0-9]*$ ]]; then
+    echo "--evolution-generations must be positive" >&2
+    exit 2
+fi
+if [[ ! -f "$runtime_env" ]]; then
+    echo "Missing runtime environment: $runtime_env" >&2
+    exit 3
+fi
+
+# shellcheck disable=SC1090
+source "$runtime_env"
+workspace_root="${AUTORESEARCH_WORKSPACE_ROOT:-$workspace_root}"
+campaign_name="${campaign_name:-multifidelity-pilot-gpu${gpu_index}}"
+campaign_root="$workspace_root/runs/$campaign_name"
+log_path="$workspace_root/logs/${campaign_name}.log"
+session_name="yaroslav-mf-gpu${gpu_index}"
+
+required_paths=(
+    "$AUTORESEARCH_PYTHON"
+    "$AUTORESEARCH_CODEX_BIN"
+    "$AUTORESEARCH_PROXY_HOME/xray"
+    "$AUTORESEARCH_PROXY_HOME/vless-mlpc.json"
+    "$AUTORESEARCH_PROXY_HOME/gost-linux-amd64-2.11.5"
+    "$DCLM_MODEL_PATH/tokenizer.json"
+    "$DCLM_MDS_PATH/corpus-manifest.json"
+    "$DCLM_SCREEN_MDS_PATH/holdout-split-manifest.json"
+    "$DCLM_SCREEN_MDS_PATH/validation/index.json"
+    "$DCLM_CORE_PATH"
+    "$AUTORESEARCH_MULTIFIDELITY_PLAN"
+)
+for path in "${required_paths[@]}"; do
+    if [[ ! -e "$path" ]]; then
+        echo "Missing required runtime path: $path" >&2
+        exit 3
+    fi
+done
+
+if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
+    echo "Refusing to use a dirty source checkout: $repo_root" >&2
+    exit 4
+fi
+if ! CODEX_HOME="$CODEX_HOME" "$AUTORESEARCH_CODEX_BIN" login status \
+    2>&1 | grep -q 'Logged in'; then
+    echo "Codex authentication is unavailable in $CODEX_HOME" >&2
+    exit 5
+fi
+
+gpu_state="$(nvidia-smi --query-gpu=index,memory.used,utilization.gpu \
+    --format=csv,noheader,nounits -i "$gpu_index")"
+IFS=',' read -r observed_index memory_used utilization <<<"$gpu_state"
+observed_index="${observed_index//[[:space:]]/}"
+memory_used="${memory_used//[[:space:]]/}"
+utilization="${utilization//[[:space:]]/}"
+if [[ "$observed_index" != "$gpu_index" ]]; then
+    echo "GPU identity mismatch: requested $gpu_index, observed $observed_index" >&2
+    exit 6
+fi
+if (( memory_used > 1024 || utilization > 5 )); then
+    echo "GPU $gpu_index is busy: ${memory_used} MiB, ${utilization}% utilization" >&2
+    exit 6
+fi
+if tmux has-session -t "$session_name" 2>/dev/null; then
+    echo "tmux session already exists: $session_name" >&2
+    exit 7
+fi
+
+commit="$(git -C "$repo_root" rev-parse HEAD)"
+echo "ready: gpu=$gpu_index commit=$commit campaign=$campaign_root"
+echo "resources: memory_used=${memory_used}MiB utilization=${utilization}%"
+if [[ "$start" != true ]]; then
+    echo "validation only; add --start to launch $session_name"
+    exit 0
+fi
+
+mkdir -p "$campaign_root" "$(dirname "$log_path")"
+launch_command="cd '$repo_root' && source '$runtime_env' && export CUDA_VISIBLE_DEVICES='$gpu_index' AUTORESEARCH_CAMPAIGN_ROOT='$campaign_root' && '$repo_root/tools/redis-start' && exec '$AUTORESEARCH_PYTHON' -u tools/run-idea-campaign-supervised.py --campaign-root '$campaign_root' --target-rounds '$target_rounds' --model '$CODEX_MODEL' --evolution-generations '$evolution_generations' >>'$log_path' 2>&1"
+tmux new-session -d -s "$session_name" "$launch_command"
+echo "started: tmux=$session_name log=$log_path"
