@@ -1,0 +1,290 @@
+# GigaEvo
+
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+Evolutionary algorithm framework that uses Large Language Models to automatically
+improve programs through iterative mutation and selection (MAP-Elites). Programs
+are Python functions; fitness is task performance. The framework is task-agnostic
+and supports single runs, multi-island evolution, and prompt co-evolution.
+
+Refer to [REPO HARNESS README](README_repo_harness_runs.md) for experiments with evolving repository/harness.
+
+## Demo
+
+![Demo](./docs/demos/demo-opt.gif)
+
+## Getting Started
+
+- **[Quick Start](docs/QUICKSTART.md)** — Get running in 5 minutes
+- **[Architecture Guide](docs/ARCHITECTURE.md)** — System design overview
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [DAG System](docs/DAG_SYSTEM.md) | Execution engine: stages, dependencies, caching |
+| [Evolution Strategies](docs/EVOLUTION_STRATEGIES.md) | MAP-Elites, multi-island, migration |
+| [Prompt Co-Evolution](docs/COEVOLUTION.md) | Co-evolve mutation prompts alongside programs |
+| [Tools](tools/README.md) | Analysis, debugging, and problem scaffolding utilities |
+| [Usage Guide](docs/USAGE.md) | Detailed usage and Hydra configuration |
+| [Contributing](docs/CONTRIBUTING.md) | Guidelines for contributors |
+| [Changelog](CHANGELOG.md) | Version history |
+
+## Quick Start
+
+### 1. Install
+
+**Requirements:** Python 3.12+, Redis
+
+```bash
+pip install -e .
+```
+
+Install Redis if not already available:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install redis-server
+
+# macOS
+brew install redis
+
+# Or run via Docker
+docker run -d -p 6379:6379 redis:7-alpine
+```
+
+### 2. Configure LLM Access
+
+Create a `.env` file with your API key:
+
+```bash
+OPENAI_API_KEY=sk-or-v1-your-api-key-here
+
+# Optional: Langfuse tracing
+LANGFUSE_PUBLIC_KEY=<key>
+LANGFUSE_SECRET_KEY=<key>
+LANGFUSE_HOST=https://cloud.langfuse.com
+```
+
+### 3. Start Redis
+
+```bash
+redis-server
+```
+
+### 4. Run Evolution
+
+```bash
+python run.py problem.name=heilbron
+```
+
+Evolution starts immediately. Logs are saved to `outputs/`.
+
+## How It Works
+
+1. **Load initial programs** from `problems/<name>/initial_programs/`
+2. **Mutate programs** using LLMs (GPT, Claude, Gemini, Qwen, etc.)
+3. **Evaluate fitness** by running each program's `entrypoint()` + `validate()`
+4. **Select solutions** using MAP-Elites across a behavior space
+5. **Repeat** for N generations
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Problem   │────▶│  Evolution  │────▶│     LLM     │
+│  (programs, │     │   Engine    │     │  (mutation)  │
+│   metrics)  │     │ (MAP-Elites)│     └──────┬──────┘
+└─────────────┘     └──────┬──────┘            │
+                           │                   ▼
+                    ┌──────┴──────┐     ┌─────────────┐
+                    │   Storage   │◀────│  Evaluator   │
+                    │   (Redis)   │     │ (DAG Runner) │
+                    └─────────────┘     └─────────────┘
+```
+
+## Customization
+
+### Experiment Presets
+
+```bash
+# Steady-state: continuous mutation/evaluation, ~8x throughput
+python run.py experiment=steady_state problem.name=heilbron
+
+# Migration bus: parallel runs share rejected programs via Redis stream
+python run.py experiment=migration_bus problem.name=heilbron redis.db=0
+python run.py experiment=migration_bus problem.name=heilbron redis.db=1
+
+# Steady-state + bus: maximum throughput with cross-run sharing
+python run.py experiment=steady_state_bus problem.name=heilbron redis.db=0
+
+# Multi-island evolution (fitness + simplicity islands)
+python run.py experiment=multi_island_complexity problem.name=heilbron
+
+# Multi-LLM exploration (diverse mutation models)
+python run.py experiment=multi_llm_exploration problem.name=heilbron
+
+# Prompt co-evolution (evolve mutation prompts alongside programs)
+python run.py experiment=prompt_coevolution problem.name=heilbron \
+    redis.db=4 prompt_fetcher.prompt_redis_db=6
+```
+
+### Common Overrides
+
+```bash
+# Limit generations
+python run.py problem.name=heilbron max_generations=10
+
+# Use different Redis database
+python run.py problem.name=heilbron redis.db=5
+
+# Change LLM model
+python run.py problem.name=heilbron model_name=anthropic/claude-3.5-sonnet
+
+# Preview config without running
+python run.py problem.name=heilbron --cfg job
+```
+
+### Prompt Co-Evolution
+
+Co-evolve the mutation prompts alongside your programs. A paired prompt run
+evolves the system prompt used by the mutation LLM, selecting for prompts that
+produce better mutations:
+
+```bash
+# Main run — uses co-evolved prompts from DB 6
+python run.py problem.name=my_task pipeline=my_pipeline \
+    prompt_fetcher=coevolved prompt_fetcher.prompt_redis_db=6 redis.db=4
+
+# Prompt run — evolves mutation prompts, reads outcomes from DB 4
+python run.py problem.name=prompt_evolution pipeline=prompt_evolution \
+    redis.db=6 main_redis_db=4 main_redis_prefix=my_task
+```
+
+See [Prompt Co-Evolution Guide](docs/COEVOLUTION.md) for the full architecture,
+launch instructions, and monitoring.
+
+## Configuration
+
+GigaEvo uses [Hydra](https://hydra.cc/) for modular configuration. All config
+files are in `config/`:
+
+| Directory | Purpose | Key files |
+|-----------|---------|-----------|
+| `experiment/` | Complete experiment templates | `base.yaml`, `steady_state.yaml`, `migration_bus.yaml`, `prompt_coevolution.yaml`, `steady_state_bus.yaml` |
+| `algorithm/` | Evolution algorithms | `single_island.yaml`, `multi_island.yaml` |
+| `llm/` | LLM setups | `single.yaml`, `heterogeneous.yaml` |
+| `pipeline/` | DAG execution pipelines | `standard.yaml`, `with_context.yaml`, `prompt_evolution.yaml` |
+| `prompt_fetcher/` | Prompt sourcing | `fixed.yaml`, `coevolved.yaml` |
+| `constants/` | Tunable parameters | `evolution.yaml`, `llm.yaml`, `islands.yaml`, `pipeline.yaml` |
+| `loader/` | Program loading | `directory.yaml`, `redis_selection.yaml` |
+| `logging/` | Backends | `tensorboard.yaml`, `wandb.yaml` |
+
+Override any setting via command line:
+```bash
+python run.py experiment=full_featured max_generations=50 temperature=0.8
+```
+
+## Creating a Problem
+
+1. Create a directory under `problems/`:
+   ```
+   problems/my_problem/
+   ├── validate.py           # Fitness evaluation
+   ├── metrics.yaml          # Metric specifications
+   ├── task_description.txt  # Problem description for the LLM
+   └── initial_programs/     # Seed programs
+       ├── strategy1.py      # Must define entrypoint()
+       └── strategy2.py
+   ```
+
+2. Run:
+   ```bash
+   python run.py problem.name=my_problem
+   ```
+
+Or use the wizard: `python -m tools.wizard config.yaml`
+
+See `problems/heilbron/` for a complete example.
+
+## Output
+
+Results are saved to `outputs/YYYY-MM-DD/HH-MM-SS/`:
+- **Logs**: `evolution_*.log`
+- **Programs**: Stored in Redis (export with `gigaevo export csv`)
+- **Metrics**: TensorBoard / W&B (if configured)
+
+## CLI Tools (`gigaevo`)
+
+Installed via `pip install -e .`. Global flags: `-e/--experiment`, `-r/--run`, `-f/--format`.
+
+| Command | Purpose |
+|---------|---------|
+| `gigaevo -e EXP status` | Live monitoring: gen, metrics, PIDs, watchdog |
+| `gigaevo -r RUN trajectory` | Gen-by-gen fitness trajectory |
+| `gigaevo -r RUN top` | Inspect best programs by fitness |
+| `gigaevo -e EXP plot comparison -o DIR` | Multi-run fitness curve plots |
+| `gigaevo -e EXP plot arms-race -o DIR` | Dual-panel adversarial arms-race plot |
+| `gigaevo -r RUN export csv -o FILE` | Export evolution data to CSV |
+| `gigaevo flush --db N --confirm` | Safely flush Redis DBs (kills workers first) |
+| `gigaevo -e EXP watchdog` | Start experiment watchdog |
+| `tools/experiment/archive_run.sh` | Archive run data before flush |
+| `tools/dag_builder/` | Visual DAG pipeline designer |
+| `tools/wizard/` | Interactive problem scaffolding |
+
+See [tools/README.md](tools/README.md) for full CLI reference and Redis key schema.
+
+## Testing
+
+```bash
+# Full test suite (uses fakeredis, no Redis server needed)
+python -m pytest
+
+# Specific area
+python -m pytest tests/stages/
+python -m pytest tests/evolution/
+
+# With coverage
+python -m pytest --cov=gigaevo --cov-report=term-missing
+
+# Linting
+ruff check . && ruff format --check .
+```
+
+## Troubleshooting
+
+**Redis database not empty:**
+```bash
+# Flush (kills exec_runner workers first):
+gigaevo flush --db 0 --confirm
+
+# Or use a different DB:
+python run.py redis.db=1
+```
+
+**LLM connection issues:**
+```bash
+# Verify API key
+echo $OPENAI_API_KEY
+
+# Test OpenRouter
+curl -H "Authorization: Bearer $OPENAI_API_KEY" https://openrouter.ai/api/v1/models
+```
+
+## License
+
+MIT License — see [LICENSE](LICENSE).
+
+## Citation
+
+```bibtex
+@misc{khrulkov2025gigaevoopensourceoptimization,
+      title={GigaEvo: An Open Source Optimization Framework Powered By LLMs And Evolution Algorithms},
+      author={Valentin Khrulkov and Andrey Galichin and Denis Bashkirov and Dmitry Vinichenko and Oleg Travkin and Roman Alferov and Andrey Kuznetsov and Ivan Oseledets},
+      year={2025},
+      eprint={2511.17592},
+      archivePrefix={arXiv},
+      primaryClass={cs.NE},
+      url={https://arxiv.org/abs/2511.17592},
+}
+```

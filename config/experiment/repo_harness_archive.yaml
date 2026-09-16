@@ -1,0 +1,53 @@
+# @package _global_
+
+defaults:
+  - repo_harness
+  - override /algorithm: repo_harness_topk_archive
+  - override /pipeline: repo_harness_archive
+  - _self_
+
+# Opt-in repo-harness variant that keeps the Git-backed mutation/evaluation
+# model but replaces single-cell MAP-Elites selection with a repo-specific
+# top-K active archive view over immutable ProgramStorage history.
+repo_archive:
+  cell_size: 8
+  hall_of_fame_size: 8
+  novelty_threshold: 0.55
+  min_quality_floor: null
+  regression_tolerance: 0.000001
+  enable_quarantine: false
+  curation_interval: 1
+  stale_child_count_threshold: 8
+  selection_temperature: 1.0
+
+# In this variant, selected "elites" are the active parent pool passed to
+# MetaRepoParentSelector. Keep mutation count low while exposing a broader
+# candidate portfolio to the selector.
+max_elites_per_generation: 12
+max_mutations_per_generation: 1
+num_parents: 2
+
+parent_selector:
+  _target_: gigaevo.evolution.mutation.parent_selector.MetaRepoParentSelector
+  num_parents: ${num_parents}
+  primary_key: ${primary_key}
+  higher_is_better: ${higher_is_better}
+  task_description: ${ref:problem_context::task_description}
+  llm: ${ref:llm}
+  source_repo: ${repo_harness.effective_source_repo}
+  max_candidate_count: 12
+  max_ranked_sets: ${max_mutations_per_generation}
+  max_prompt_tokens: 150000
+  prompt_token_encoding: o200k_base
+  max_diff_chars: 12000
+  max_reflection_chars: 5000
+  active_archive_roles:
+    - active_parent
+    - hall_of_fame
+    - local_pareto
+    - novelty
+  excluded_archive_roles:
+    - failure
+    - superseded
+    - quarantined
+  fail_open: true

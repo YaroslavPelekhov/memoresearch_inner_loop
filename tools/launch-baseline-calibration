@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Fail-closed handoff from corpus/stability preparation to LR calibration.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+data_root="$(dirname "$repo_root")/data"
+python_bin="${AUTORESEARCH_PYTHON:-python}"
+training_python="${AUTORESEARCH_TRAINING_PYTHON:-python}"
+gpu_index="${AUTORESEARCH_GPU_INDEX:-0}"
+output_root="$repo_root/runs/baseline-calibration"
+lease_token_file="$repo_root/runs/gpu${gpu_index}-lease.token"
+
+mkdir -p "$output_root"
+cd "$repo_root"
+export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
+
+has_live_matching_process() {
+    local pattern="$1"
+    local pid
+    local state
+    while IFS= read -r pid; do
+        state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+        if [[ -n "$state" && "$state" != Z* ]]; then
+            return 0
+        fi
+    done < <(pgrep -f "$pattern" || true)
+    return 1
+}
+
+while has_live_matching_process "tools/prepare-dclm-corpus.py.*--convert"; do
+    sleep 30
+done
+
+# The conversion process may have started from an older in-memory version of
+# the helper. Re-running is idempotent: it verifies downloads, preserves the
+# completed MDS data, and refreshes the full provenance manifest.
+"$python_bin" "$repo_root/tools/prepare-dclm-corpus.py" \
+    --training-python "$training_python" \
+    --convert \
+    >"$output_root/corpus-verification.log" 2>&1
+
+while has_live_matching_process "runs/v4.*train.py"; do
+    sleep 30
+done
+
+if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
+    echo "Refusing calibration from a dirty source repository" >&2
+    exit 2
+fi
+if [[ ! -r "$lease_token_file" ]]; then
+    echo "GPU lease token is missing: $lease_token_file" >&2
+    exit 2
+fi
+
+export CUDA_VISIBLE_DEVICES="$gpu_index"
+export AUTORESEARCH_PHYSICAL_GPU_INDEX="$gpu_index"
+export AUTORESEARCH_GPU_LEASE_TOKEN="$(<"$lease_token_file")"
+export DCLM_MODEL_PATH="$data_root/model-template-gpt-neox-140m"
+export DCLM_MDS_PATH="$data_root/dclm-mds-3b-v1"
+export DCLM_CORE_PATH="$data_root/dclm-core"
+export DCLM_EVAL_CACHE_PATH="$data_root/eval-cache"
+
+"$python_bin" -m autoresearch.benchmark \
+    --dry-run \
+    --run-dir "$output_root/preflight" \
+    >"$output_root/preflight.stdout.log" \
+    2>"$output_root/preflight.stderr.log"
+
+exec "$python_bin" -u "$repo_root/tools/run-baseline-calibration.py" \
+    --output-root "$output_root"

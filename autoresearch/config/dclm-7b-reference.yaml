@@ -1,0 +1,606 @@
+global_seed: 2048
+max_seq_len: 2048
+
+user: ...
+exp_name: dclm_exps
+run_name: test_7b_140b_baseline
+
+tensorboard_path: .../tensorboard/${exp_name}
+save_folder: .../checkpoints/${exp_name}/${run_name}
+
+eos_token_id: 2
+varlen_input: false
+enable_async_tp: false  # enables async tensor parallelism
+zero_nan_grads: false
+tp_size: 1
+sp_size:
+  - sp_size: 1
+    max_seq_len: ${max_seq_len}
+
+# !!! num_attention_heads is mandatory for job_dispatcher_callback callback !!!
+num_attention_heads: 32
+
+model_path: .../models_templates/dclm-7b-128k_digit_tokenizer
+model:
+  name: giga_causal_lm
+  init_device: cpu # could be meta
+  pretrained: false
+  pretrained_model_name_or_path: ${model_path}
+  config_overrides:
+    max_position_embeddings: ${max_seq_len}
+
+    eos_token_id: ${eos_token_id}
+    hidden_size: 4096
+    initializer_range: 0.02
+    intermediate_size: 11008
+    num_attention_heads: 32
+    num_hidden_layers: 32
+    num_key_value_heads: 32
+    rms_norm_eps: 1e-05
+    rope_theta: 10000.0
+
+    init_type: dclm
+
+    z_loss_eps: 5e-6  # Z-loss scale, 0.0 by default. Enables Z-loss calculation if value is > 0.
+    apply_qk_norm: true  # `false` by default. Enables applying QK normalization before RoPE and attention.
+
+    use_cache: false
+
+    ### non transformers agruments
+    tp_size: ${tp_size}
+    use_liger: false
+
+    fused_mlp: false
+    fused_mlp_checkpoint_lvl: 0
+    activation_checkpoint_layers_num: null
+
+    loss_inplace_backward: false
+
+    attention_hidden_size: null # if null, then attention_hidden_size = hidden_size
+    attention_bias: false # if true, then enables biases in Q,K,V linear layers
+    # freeze_non_embed: false # if true, then freezes all giga weights except embed weights. It only works with giga model.
+
+    attention_type: LlamaAttention  # Use LlamaPackedRingAttention to use ring attention implementation in SP case
+    # attention_type: LlamaPackedAttention  # Use LlamaPackedRingAttention to use ring attention implementation in SP case
+
+    # # MLA
+    # attention_type: LlamaLatentAttention
+    # apply_torch_compile_to_projections: true
+    # use_custom_rotary_kernel: true  # false by default
+    # qk_nope_head_dim: 64
+    # qk_rope_head_dim: 64
+    # v_head_dim: 128
+    # kv_lora_rank: 512  # x8 smaller hidden_size
+    # q_lora_rank: 1024  # x4 smaller hidden_size
+
+    # use_mtp: true
+    # mtp_predictor_num: 1
+    # mtp_loss_weight: 0.3
+    # mtp_loss_1lm_head: false
+
+    # # MLA
+    # attention_type: LlamaLatentAttention
+    # apply_torch_compile_to_projections: true
+    # use_custom_rotary_kernel: false
+    # qk_nope_head_dim: 64
+    # qk_rope_head_dim: 64
+    # v_head_dim: 128
+    # kv_lora_rank: 1024  # x4 smaller hidden_size
+    # q_lora_rank: 2048  # x2 smaller hidden_size
+    # # kv_lora_rank: 512  # x8 smaller hidden_size
+    # # q_lora_rank: 1024  # x4 smaller hidden_size
+
+    parallel_embedding_type: EmbeddingParallelEmbedding  # in case of tp_size > 1, can be set to VocabParallelEmbedding (not recommended)
+
+    # # rope scaling example
+    # rope_scaling:
+    #   factor: 8.0
+    #   low_freq_factor: 1.0
+    #   high_freq_factor: 4.0
+    #   original_max_position_embeddings: 8192
+    #   rope_type: "llama3"
+
+# Tokenizer
+tokenizer:
+  name: ${model_path}
+
+global_train_batch_size: 2048  # ~4.2M tokens
+device_train_microbatch_size: 2
+device_eval_batch_size: 1
+
+max_duration: 33500ba # 140B tokens
+eval_interval: 1500ba
+eval_before_train: regular # one of [skip, force, regular]
+eval_subset_num_batches: -1
+
+# Dataloaders
+train_loader:
+  name: text
+  eos_token_id: ${eos_token_id}
+  sft_mode: false
+  dataset:
+    epoch_size: 1062M  # 8.7T tokens epoch
+    fim_rate: 0.0
+    streams:
+      # MULTILING
+      dclm-baseline:
+          local: .../tokenized_data/8k_context_128k_digit_tokenizer
+          proportion: 100.0
+          split: dclm-baseline-1.0
+    shuffle: true
+    max_seq_len: ${max_seq_len}
+    shuffle_seed: ${global_seed}
+  drop_last: true
+  num_workers: 1
+
+# Optimization
+scheduler:
+  name: cosine_with_warmup
+  t_warmup: 5000ba
+  alpha_f: 0.015  # 3e-5 final LR
+
+optimizer:
+  name: decoupled_adamw
+  lr: 2.0e-3
+  betas:
+  - 0.9
+  - 0.95
+  eps: 1.0e-08
+  weight_decay: 1.0e-4  # wd_article * lr = 0.05 * 2e-3
+  # param_groups:
+  #   - param_str_match: "norm"
+  #     lr: 1e-4
+  #     weight_decay: 0.0
+  #   - param_str_match: "lm_head"
+  #     lr: 6e-4
+  #     weight_decay: 6.0e-5
+  # disable_grad: ["layers.1", "layers.5.self_attn.qkv", "model.norm"]
+
+# Algorithms
+algorithms:
+  gradient_clipping:
+    clipping_type: norm
+    clipping_threshold: 1.0
+
+# BENCHMARKS
+cached_datasets_directory_template: .../metrics_cache # default paths are already in scripts/train.py
+
+# Allows you to aggregate metrics using gauntlet_tags
+eval_gauntlet:
+  weighting: EQUAL
+  # this allows you to average aggregations from gauntlet_tags
+  averages:
+    ru_en_average:
+    - ru
+    - en
+
+icl_tasks:
+  - label: mmlu
+    dataset_uri: .../metrics/mmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [0, 5]
+    icl_task_type: mmlu
+    ####################
+    # only for mmlu
+    # be careful, because the settings
+    # applied to all dataloaders in this tasks
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: false
+    max_seq_len: 4096
+    gauntlet_tags: ['en']
+    ####################
+  - label: teenmmlu
+    dataset_uri: .../metrics/mmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [0, 5]
+    icl_task_type: teenmmlu
+    ####################
+    # only for mmlu
+    # be careful, because the settings
+    # applied to all dataloaders in this tasks
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: false
+    max_seq_len: 4096
+    gauntlet_tags: ['en']
+    ####################
+  - label: mmlu-pro
+    dataset_uri: .../metrics/mmlu-pro
+    # each num_fewshot is separate dataloader
+    num_fewshot: [0, 5]
+    icl_task_type: mmlu
+    choice_num2symbol:
+       0: A
+       1: B
+       2: C
+       3: D
+       4: E
+       5: F
+       6: G
+       7: H
+       8: I
+       9: J
+    ####################
+    # only for mmlu
+    # be careful, because the settings
+    # applied to all dataloaders in this tasks
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: false
+    max_seq_len: 4096
+    gauntlet_tags: ['en']
+    ####################
+  - label: fakemmlu
+    dataset_uri: .../metrics/fakemmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: fakemmlu
+    max_seq_len: 1024
+    gauntlet_tags: ['en']
+  - label: babymmlu
+    dataset_uri: .../metrics/babymmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: babymmlu
+    max_seq_len: 2048
+    gauntlet_tags: ['ru']
+  - label: babymmlu2
+    dataset_uri: .../metrics/babymmlu2
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: babymmlu
+    max_seq_len: 2048
+    gauntlet_tags: ['ru']
+  - label: rummlu
+    dataset_uri: .../metrics/rummlu-new
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: rummlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: biommlu
+    dataset_uri: .../metrics/biommlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: biommlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: medmmlu
+    dataset_uri: .../metrics/medmmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: medmmlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: biommlu
+    dataset_uri: .../metrics/biommlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: biommlu
+    max_seq_len: 4096
+  - label: chemmmlu
+    dataset_uri: .../metrics/chemmmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: chemmmlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: mathmmlu
+    dataset_uri: .../metrics/mathmmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: mathmmlu
+    max_seq_len: 4096 #, says 4k is too small, there are larger samples
+    gauntlet_tags: ['ru', 'math']
+  - label: ruopenbookqa
+    dataset_uri: .../metrics/ruopenbookqa.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    max_seq_len: 2048
+    gauntlet_tags: ['ru']
+  - label: boolq
+    dataset_uri: .../metrics/boolq.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    max_seq_len: 2048
+    gauntlet_tags: ['en']
+  - label: hellaswag
+    dataset_uri: .../metrics/hellaswag.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    max_seq_len: 1024
+    gauntlet_tags: ['en']
+  - label: ruworldtree
+    dataset_uri: .../metrics/ruworldtree.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    max_seq_len: 2048
+    gauntlet_tags: ['ru']
+  - label: winogrande
+    dataset_uri: .../metrics/winogrande.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: schema
+    max_seq_len: 2048
+    gauntlet_tags: ['en']
+### Core Metrics
+  - label: hellaswag_zeroshot
+    dataset_uri: ".../dclm_local_data/language_understanding/hellaswag.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: arc_easy
+    dataset_uri: ".../dclm_local_data/world_knowledge/arc_easy.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+  - label: arc_challenge
+    dataset_uri: ".../dclm_local_data/world_knowledge/arc_challenge.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+  - label: copa
+    dataset_uri: ".../dclm_local_data/commonsense_reasoning/copa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: commonsense_qa
+    dataset_uri: ".../dclm_local_data/commonsense_reasoning/commonsense_qa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: piqa
+    dataset_uri: ".../dclm_local_data/commonsense_reasoning/piqa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+  - label: openbook_qa
+    dataset_uri: ".../dclm_local_data/commonsense_reasoning/openbook_qa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: lambada_openai
+    dataset_uri: ".../dclm_local_data/language_understanding/lambada_openai.jsonl"
+    num_fewshot: [0]
+    icl_task_type: language_modeling
+    gauntlet_tags: ['core']
+  - label: hellaswag-10shot
+    dataset_uri: ".../dclm_local_data/language_understanding/hellaswag.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: winograd
+    dataset_uri: ".../dclm_local_data/language_understanding/winograd_wsc.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['core']
+  - label: winogrande
+    dataset_uri: ".../dclm_local_data/language_understanding/winogrande.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['core']
+  - label: bigbench_language_identification
+    dataset_uri: ".../dclm_local_data/language_understanding/bigbench_language_identification.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: agi_eval_lsat_ar
+    dataset_uri: ".../dclm_local_data/symbolic_problem_solving/agi_eval_lsat_ar.jsonl"
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: agi_eval_lsat_lr
+    dataset_uri: ".../dclm_local_data/reading_comprehension/agi_eval_lsat_lr.jsonl"
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: boolq
+    dataset_uri: ".../dclm_local_data/reading_comprehension/boolq.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+### ru core metrics
+  - label: ru_hellaswag_zeroshot
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/hellaswag.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_arc_easy
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/arc_easy.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['ru-core']
+  - label: ru_arc_challenge
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/arc_challenge.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['ru-core']
+  - label: ru_copa
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/copa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_commonsense_qa
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/commonsense_qa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_piqa
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/piqa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['ru-core']
+  - label: ru_openbook_qa
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/openbook_qa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_lambada_openai
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/lambada_openai.jsonl"
+    num_fewshot: [0]
+    icl_task_type: language_modeling
+    gauntlet_tags: ['ru-core']
+  - label: ru_hellaswag
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/hellaswag.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_winograd
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/winograd_wsc.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['ru-core']
+  - label: ru_winogrande
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/winogrande.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['ru-core']
+  - label: ru_agi_eval_lsat_ar
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/agi_eval_lsat_ar.jsonl"
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_boolq
+    dataset_uri: ".../dclm_local_data/ru_core_metrics/boolq.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+
+
+# Checkpoint to local filesystem or remote object store
+save_interval: 1500ba
+# If specified only every `stable_save_interval`-th checkpoint will be considered as "stable" and preserved
+# the rest will be considered as "quick" and deleted after the creation of a new checkpoint
+# `stable_save_interval` must be divisible by `save_interval`
+# note: only checkpoints created during a given launch will be deleted
+stable_save_interval: 3000ba
+
+load_weights_only: false
+# save_num_checkpoints_to_keep: 1  # Important, this cleans up checkpoints saved to DISK
+# save_folder: s3://my-bucket/my-folder/{run_name}/checkpoints
+
+# System
+seed: ${global_seed}
+precision: amp_bf16
+dist_timeout: 1800
+
+# ---- Select ONE fsdp setup ----
+# ---- Comment another one ----
+
+# gigaFSDP
+gigafsdp_config:
+  load_monolith_rank0_only: false
+  state_dict_type: local
+  sync_module_states: false
+  all_reduce_grads_across_model_parallel_group: ${enable_async_tp}
+  # --- optional gigafsdp params ---
+  # hpz_first_layers_num: 40
+  # hpz_group_size: 4
+  hybrid_group_size: 8
+  # save_gigafsdp_sharded_folder_path: "..."
+  # zero_stage: 3  # zero-1 and zero-2 are also available
+
+  activation_checkpointing: false
+  activation_checkpointing_reentrant: false
+  mixed_precision:
+    param_dtype: bf16
+    buffer_dtype: fp32
+    reduce_dtype: fp32
+
+# FP8
+# fp8_config:
+#   wrappers:
+#     - keep_hp_layers: ["lm_head", "down_proj", "up_proj", "gate_proj"] # down_proj, ...
+#       fp8_strategy: all_tensorwise # (all_tensorwise, all_axiswise, lw_axiswise_with_gw_hp)
+#       force_recompute_fp8_weight_in_bwd: True # disable it with full activation_checkpointing
+#       exclude_layer: True
+#     - keep_hp_layers: ["down_proj", "up_proj", "gate_proj"]
+#       fp8_strategy: all_tensorwise
+#       force_recompute_fp8_weight_in_bwd: False
+#       exclude_layer: False # include only this type of layers in fp8
+#   enable_compiler: True
+
+# Logging
+progress_bar: false
+log_to_console: true
+console_log_interval: 20ba
+
+callbacks:
+  speed_monitor:
+    window_size: 10
+  stage_time_profiler: {}
+  lr_monitor: {}
+  memory_monitor: {}
+  runtime_estimator: {}
+  optimizer_monitor:
+    batch_log_interval: 100
+  # activation_monitor:
+  #   interval: 100ba
+  #   only_log_wandb: false
+  #   keep_only_module_types: ['qkv_proj', 'o_proj', 'down_proj']
+  #   ignore_module_types: ['_tp_linear_submodule']
+  #   log_module_output: false # log module output or not (by default we log only input to selected modules)
+  #   log_gradients: true
+  #   log_grad_input: false # log grad_input at backward or not (by default we log only grad_output of selected modules)
+  #   stat_list: ['amax', 'amean'] # 'min', 'amin', 'l2norm', average, kurtosis
+  scheduled_gc:
+    batch_interval: 1000
+  training_metrics_monitor:
+    batch_log_interval: 500
+  # mono_ckpt_saver:
+  #   batch_interval: ${save_interval}
+  #   save_folder: ${save_folder}
+  # memory_stats_saver:
+  #   collect_memory_snapshot: true
+  #   folder: '${tensorboard_path}/{run_name}/memory_stats_saver'
+  #   save_interval: 2ba
+  # ema_weights:
+  #   alpha: 0.01
+  #   update_period: 10
+  #   start_batch: 1
+
+auto_log_hparams: false
+autoresume: true
+
+# Save checkpoint asynchronously during training
+save_checkpoint_async: true
+# Compute hashes for saved/loaded checkpoints and check for corruption
+compute_checkpoint_hashes: true
+
+date: null
+loggers:
+  tensorboard:
+    log_dir: ${tensorboard_path}
+    rank_zero_only: true
+  # wandb:
+  #   name: ${run_name}-${date}
+  #   project: ${exp_name}
+  #   group: null
+  #   entity: null
+  #   tags: null
+  #   log_artifacts: false
+  #   rank_zero_only: true
+  #   init_kwargs:
+  #     notes: "Heya"
+  #     config: null
+
+# If the parameters of your model do not fully match the parameters of the checkpoint,
+# this will lead to an error in load_state_dict or sharding process (with gigafsdp).
+# If your model has additional parameters that are initialized separately and not loaded via load_path,
+# then you need to set false here.
+load_strict_model_weights: true
+
+# Load from local filesystem or remote object store
+# load_path: ...

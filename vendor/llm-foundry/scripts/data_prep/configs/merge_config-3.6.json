@@ -1,0 +1,19 @@
+{
+    "base_dir": "-",
+    "one_level_dirs": [],
+    "two_level_dirs": [
+        "arabic",
+        "fineweb_edu_sharded",
+        "libgen_nougat_mathpix_sharded",
+        "portuguese",
+        "ru_cc_clear",
+        "tribe_factoring_sharded",
+        "tribe_medical_sharded"
+    ],
+    "three_level_dirs": [],
+    "backup": {
+        "two_level_dirs": [
+            "starcoder2_sharded"
+        ]
+    }
+}

@@ -1,0 +1,131 @@
+# Infrastructure: server inventory for GigaEvo experiments
+#
+# This file is the SINGLE SOURCE OF TRUTH for all server IPs, ports, models,
+# and roles. All experiment launch scripts, watchdogs, CONTEXT.md files, and
+# skills should reference this file rather than hardcoding IPs.
+#
+# Update this file when servers change. See verification commands at bottom.
+#
+# Last verified: 2026-03-27
+
+# --- LiteLLM Proxy ---
+# Single load-balanced proxy for all LLM access. Start with: bash tools/litellm.sh
+# All shared_config.py and launch scripts should point to this proxy.
+
+litellm_proxy:
+  host: "10.232.30.185"
+  port: 4000
+  alias_chain: "Qwen/Qwen3-8B"
+  alias_mutation: "Qwen3-235B-A22B-Thinking-2507"
+
+# --- Chain Execution LLMs ---
+# Used for running evolved chains (retrieval, reasoning steps).
+# Qwen3-8B on 8-node cluster (double previous capacity).
+
+chain_servers:
+  model: "Qwen/Qwen3-8B"
+  context_window: 32768
+  thinking_mode: true
+  endpoints:
+    - host: "10.232.45.196"
+      port: 8000
+      label: "chain-0"
+    - host: "10.232.45.196"
+      port: 8001
+      label: "chain-1"
+    - host: "10.232.45.196"
+      port: 8002
+      label: "chain-2"
+    - host: "10.232.45.196"
+      port: 8003
+      label: "chain-3"
+    - host: "10.232.45.196"
+      port: 8004
+      label: "chain-4"
+    - host: "10.232.45.196"
+      port: 8005
+      label: "chain-5"
+    - host: "10.232.45.196"
+      port: 8006
+      label: "chain-6"
+    - host: "10.232.45.196"
+      port: 8007
+      label: "chain-7"
+    - host: "10.232.30.185"
+      port: 8000
+      label: "chain-8"
+    - host: "10.232.24.83"
+      port: 8000
+      label: "chain-9"
+      # vLLM here was launched without --served-model-name, so it advertises
+      # the HF cache path as the model id. Remap to the fleet alias so
+      # LiteLLM can route uniformly.
+      served_model_name: "/mnt/virtual_ai0001071-04017_SR004-nfs1/huggingface/hub/models--Qwen--Qwen3-8B/snapshots/b968826d9c46dd6066d109eabc6255188de91218"
+
+# --- Mutation / Insights LLMs ---
+# Used for LLM-based code mutation and insights generation.
+# Qwen3-235B on 6 nodes.
+
+mutation_servers:
+  model: "Qwen3-235B-A22B-Thinking-2507"
+  port: 8777
+  thinking_mode: true
+  endpoints:
+    - host: "10.232.90.109"
+      label: "mutation-1"
+      status: active
+    - host: "10.232.38.220"
+      label: "mutation-2"
+      status: active
+    - host: "10.232.22.232"
+      label: "mutation-3"
+      status: active
+    - host: "10.232.21.74"
+      label: "mutation-4"
+      status: active
+    - host: "10.232.36.140"
+      label: "mutation-5"
+      status: active
+    - host: "10.232.33.151"
+      label: "mutation-6"
+      status: active
+
+# --- Squid Proxy Bypass ---
+# All internal IPs must be in NO_PROXY to avoid the system Squid proxy
+# intercepting HTTP calls. shared_config.py handles this automatically;
+# launch scripts must also export NO_PROXY.
+# NOTE: With litellm proxy on localhost, only the litellm process needs
+# direct access to backend IPs. Clients talk to localhost:4000.
+
+no_proxy_hosts:
+  - "10.232.36.140"
+  - "10.232.33.151"
+  - "10.232.30.185"
+  - "10.232.45.196"
+  - "10.232.24.83"
+  - "10.232.90.109"
+  - "10.232.38.220"
+  - "10.232.22.232"
+  - "10.232.21.74"
+  - "localhost"
+  - "127.0.0.1"
+
+# --- Task-Specific Environment Variables ---
+# Chain URL env vars per task (set in launch scripts).
+
+task_env_vars:
+  hotpotqa:
+    chain_url_var: "HOTPOTQA_CHAIN_URL"
+  hover:
+    chain_url_var: "HOVER_CHAIN_URL"
+
+# --- Verification ---
+# To check all endpoints are live:
+#   for ip in 10.232.45.196; do
+#     curl -s http://$ip:8000/v1/models | python3 -c "import sys,json; print(f'$ip:8000', json.load(sys.stdin)['data'][0]['id'])" 2>/dev/null || echo "$ip:8000 UNREACHABLE"
+#   done
+#   for ip in 10.232.90.109 10.232.38.220 10.232.22.232 10.232.21.74 10.232.36.140 10.232.33.151; do
+#     curl -s http://$ip:8777/v1/models | python3 -c "import sys,json; print(f'$ip:8777', json.load(sys.stdin)['data'][0]['id'])" 2>/dev/null || echo "$ip:8777 UNREACHABLE"
+#   done
+# To check litellm proxy:
+#   curl -s http://localhost:4000/v1/models | python3 -m json.tool

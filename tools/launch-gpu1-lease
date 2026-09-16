@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Reserve one selected GPU for descendants of the live DCLM experiment panes.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python_bin="${AUTORESEARCH_PYTHON:-python}"
+gpu_index="${AUTORESEARCH_GPU_INDEX:-1}"
+token_file="$repo_root/runs/gpu${gpu_index}-lease.token"
+owner_arguments=()
+
+for session in baseline-calibration calibrated-autoresearch-handoff; do
+    if tmux has-session -t "$session" 2>/dev/null; then
+        pane_pid="$(tmux display-message -p -t "$session":0.0 '#{pane_pid}')"
+        owner_arguments+=(--allow-ancestor-pid "$pane_pid")
+    fi
+done
+
+if (( ${#owner_arguments[@]} == 0 )); then
+    echo "No live DCLM calibration or handoff pane can own GPU ${gpu_index}" >&2
+    exit 2
+fi
+
+cd "$repo_root"
+exec "$python_bin" -u tools/enforce-gpu-lease.py \
+    --gpu-index "$gpu_index" \
+    --allow-root "$repo_root" \
+    "${owner_arguments[@]}" \
+    --token-file "$token_file" \
+    --runtime-mask-conflicting-services \
+    --poll-seconds 5

@@ -1,0 +1,12 @@
+{
+    "base_dir": "/path/to/tokenized/data",
+    "one_level_dirs": [
+        "dataset1"
+    ],
+    "two_level_dirs": [
+        "dataset2"
+    ],
+    "three_level_dirs": [
+        "dataset3"
+    ]
+}

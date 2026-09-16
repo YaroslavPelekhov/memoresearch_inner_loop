@@ -1,0 +1,20 @@
+{
+    "base_dir": "-",
+    "one_level_dirs": [
+        "llemma_algebraic_stack_sharded",
+        "llemma_open_web_math_sharded"
+    ],
+    "two_level_dirs": [
+        "arxiv_sharded",
+        "frw_filtered_sharded",
+        "libgen_fiction_sharded",
+        "libgen_sharded",
+        "pubmed_sharded",
+        "stackexchange_sharded",
+        "tribe_juridicial_sharded",
+        "tribe_musdigest_sharded"
+    ],
+    "three_level_dirs": [
+        "wikipedia_sharded"
+    ]
+}

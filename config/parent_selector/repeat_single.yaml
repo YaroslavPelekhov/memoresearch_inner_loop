@@ -1,0 +1,7 @@
+# @package _global_
+
+# Repeatedly yield the sole active elite so one generation can create a batch
+# of independent sibling mutations from exactly the same incumbent.
+parent_selector:
+  _target_: gigaevo.evolution.mutation.parent_selector.RandomParentSelector
+  num_parents: 1

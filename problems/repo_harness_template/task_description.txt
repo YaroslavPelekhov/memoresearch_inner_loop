@@ -1,0 +1,27 @@
+Evolve a Git-backed coding-agent harness repository for Terminal-Bench 2.
+
+Each candidate is a repository commit containing a Harbor-compatible terminal
+agent. The benchmark command checks out that commit, runs the agent on a
+configurable Terminal-Bench 2 task set, and returns metrics as JSON.
+
+The primary objective is to maximize Terminal-Bench pass rate while keeping the
+agent valid, general-purpose, and cost-aware. Architectural experimentation is
+explicitly in scope: candidates may redesign the agent loop, planner/executor
+structure, verifier and self-check flow, memory/state representation, recovery
+policy, parsers, prompt stack, session handling, or configuration when the
+change targets a plausible general failure mode.
+
+Prefer systematic mechanisms over benchmark-shaped patches. A useful mutation
+may be a local bug fix, but it may also introduce a new controller, split the
+agent into collaborating components, add structured task-state tracking, change
+how observations are summarized, or replace brittle heuristics with a more
+principled execution policy. Do not hardcode benchmark answers, hidden tests,
+task IDs, verifier outputs, or evaluator quirks, and do not change the benchmark
+or metric parser to make scores easier.
+
+Validate cheaply where possible, but do not require every mutation to be a small
+edit. Start from Harbor's Terminus-2 baseline or the selected parent, inspect
+failures on one or a few representative tasks, and make the smallest coherent
+experiment that can test a new general agent design idea. Scale to the hard
+subset or the full 89-task benchmark only when the behavior is stable enough to
+justify the cost.

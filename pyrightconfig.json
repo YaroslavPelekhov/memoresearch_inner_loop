@@ -1,0 +1,20 @@
+{
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux",
+  "venvPath": "/home/jovyan/.mlspace/envs",
+  "venv": "evo",
+  "include": [
+    "gigaevo",
+    "tests",
+    "tools",
+    "problems",
+    "run.py"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/*.pyc"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none"
+}

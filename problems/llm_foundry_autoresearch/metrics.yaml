@@ -1,0 +1,111 @@
+specs:
+  fitness:
+    description: Reciprocal 4096-batch heldout loss for confirmed winners; higher is better.
+    decimals: 6
+    is_primary: true
+    higher_is_better: true
+    lower_bound: 0.0
+    upper_bound: 1.0
+    include_in_prompts: true
+    significant_change: 0.0001
+    sentinel_value: -1.0
+  is_valid:
+    description: Whether the configured run completed; smoke mode explicitly skips CORE.
+    decimals: 0
+    is_primary: false
+    higher_is_better: true
+    lower_bound: 0.0
+    upper_bound: 1.0
+    include_in_prompts: true
+    significant_change: 1.0
+    sentinel_value: 0.0
+  llmfoundry_core_equal_raw:
+    description: Exact LLM Foundry metrics_gauntlet/core scalar used as fitness.
+    decimals: 6
+    is_primary: false
+    higher_is_better: true
+    lower_bound: 0.0
+    upper_bound: 1.0
+    include_in_prompts: true
+    significant_change: 0.001
+    sentinel_value: -1.0
+  heldout_loss_final:
+    description: Language cross-entropy on the final fixed held-out evaluation.
+    decimals: 6
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 20.0
+    include_in_prompts: true
+    significant_change: 0.005
+    sentinel_value: 20.0
+  heldout_loss_tail_mean:
+    description: Mean of the final two held-out language cross-entropies.
+    decimals: 6
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 20.0
+    include_in_prompts: true
+    significant_change: 0.005
+    sentinel_value: 20.0
+  heldout_loss_auc:
+    description: Mean fixed-heldout language cross-entropy across four evenly spaced evaluations.
+    decimals: 6
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 20.0
+    include_in_prompts: true
+    significant_change: 0.005
+    sentinel_value: 20.0
+  heldout_evaluations:
+    description: Number of fixed held-out observations contributing to the loss trajectory.
+    decimals: 0
+    is_primary: false
+    higher_is_better: true
+    lower_bound: 0.0
+    upper_bound: 4.0
+    include_in_prompts: true
+    significant_change: 1.0
+    sentinel_value: 0.0
+  steady_state_tokens_per_second:
+    description: Last warmed Composer training-throughput observation.
+    decimals: 1
+    is_primary: false
+    higher_is_better: true
+    lower_bound: 0.0
+    upper_bound: 1000000.0
+    include_in_prompts: true
+    significant_change: 1000.0
+    sentinel_value: 0.0
+  peak_gpu_memory_mib:
+    description: Peak whole-device GPU memory sampled during the benchmark.
+    decimals: 0
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 81920.0
+    include_in_prompts: true
+    significant_change: 256.0
+    sentinel_value: 81920.0
+  wall_time_seconds:
+    description: End-to-end candidate benchmark wall time.
+    decimals: 1
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 100000.0
+    include_in_prompts: true
+    significant_change: 60.0
+    sentinel_value: 100000.0
+  n_params:
+    description: Instantiated LLM Foundry model parameter count; fixed within 1% of the baseline.
+    decimals: 0
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 142273740.0
+    upper_bound: 145147956.0
+    include_in_prompts: true
+    significant_change: 1.0
+    sentinel_value: 145147956.0

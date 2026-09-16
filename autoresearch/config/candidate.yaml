@@ -1,0 +1,6 @@
+# The benchmark merges only this subtree into the fixed LLM Foundry config.
+model:
+  config_overrides:
+    decoder_layer_module: autoresearch.model.hybrid_decoder
+    decoder_layer_type: AutoresearchHybridDecoderLayer
+    decoder_layer_kwargs: {}

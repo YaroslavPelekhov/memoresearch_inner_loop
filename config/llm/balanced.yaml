@@ -1,0 +1,28 @@
+# @package _global_
+
+# Load-balanced mutation LLM: distributes requests across all endpoints
+# via Redis-coordinated least-loaded routing. All runs share the pool,
+# so idle servers are automatically used by other runs.
+#
+# Usage: python run.py llm=balanced ...
+# No per-run llm_base_url needed — all endpoints listed here.
+
+llm:
+  _target_: gigaevo.llm.models.MultiModelRouter
+  _convert_: all
+  models:
+    - _target_: gigaevo.infra.balanced_chat.BalancedChatOpenAI
+      model: ${model_name}
+      api_key: ${oc.env:OPENAI_API_KEY}
+      temperature: ${temperature}
+      max_tokens: ${max_tokens}
+      pool_name: "mutation"
+      redis_url: "redis://localhost:6379/15"
+      cooldown_secs: 60
+      endpoints:
+        - "http://10.232.90.109:8777/v1"
+        - "http://10.232.38.220:8777/v1"
+        - "http://10.232.22.232:8777/v1"
+        - "http://10.232.21.74:8777/v1"
+  probabilities: [1.0]
+  writer: ${writer}

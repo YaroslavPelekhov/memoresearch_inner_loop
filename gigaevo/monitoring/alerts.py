@@ -1,0 +1,403 @@
+"""Alert detection for experiment health monitoring.
+
+Analyzes RunSnapshot sequences to detect stalls, crashes, high invalidity,
+and completion. Multi-signal detection prevents false alarms (P-WD-01).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+from loguru import logger
+
+from gigaevo.monitoring.snapshot import RunSnapshot
+
+
+class AlertType(StrEnum):
+    """Types of alerts the detector can raise."""
+
+    STALL = "stall"
+    CRASH = "crash"
+    HIGH_INVALIDITY = "high_invalidity"
+    COMPLETION = "completion"
+    LOW_THROUGHPUT = "low_throughput"
+    MODEL_DRIFT = "model_drift"
+    EVENT_RATE_ZERO = "event_rate_zero"
+
+
+class AlertSeverity(StrEnum):
+    """Alert severity levels."""
+
+    INFO = "info"
+    WARN = "warn"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class Alert:
+    """An immutable alert raised by the AlertDetector.
+
+    Attributes:
+        alert_type: Category of the alert.
+        severity: How urgent this alert is.
+        run_label: Which run this alert is about (or "experiment" for global alerts).
+        message: Human-readable summary.
+        details: Optional structured data for programmatic consumers.
+        cooldown_discriminator: Optional extra key fed into cooldown tracking
+            so one alert subtype can't mask another with the same
+            ``(alert_type, run_label)`` pair. When set, the cooldown tracker
+            uses ``(alert_type, cooldown_discriminator)``; when unset it falls
+            back to ``(alert_type, run_label)``. This keeps cooldown generic —
+            emitters opt in without the tracker knowing about specific types.
+    """
+
+    alert_type: AlertType
+    severity: AlertSeverity
+    run_label: str
+    message: str
+    details: dict | None = field(default=None)
+    cooldown_discriminator: str | None = field(default=None)
+
+    def __str__(self) -> str:
+        return f"[{self.severity.upper()}] {self.alert_type}: {self.run_label} -- {self.message}"
+
+
+class AlertDetector:
+    """Detects experiment health issues from RunSnapshot sequences.
+
+    Multi-signal detection prevents false alarms (P-WD-01). Cooldown
+    prevents alert floods. Stateful: tracks previous snapshots and
+    alert history between calls.
+
+    Usage:
+        detector = AlertDetector()
+        alerts = detector.check(current_snapshots)
+        # ... next cycle ...
+        alerts = detector.check(current_snapshots)
+    """
+
+    def __init__(
+        self,
+        invalidity_threshold: float = 0.75,
+        invalidity_min_generation: int = 3,
+        cooldown_cycles: int = 2,
+        excluded_events: Iterable[str] | None = None,
+    ):
+        self._invalidity_threshold = invalidity_threshold
+        self._invalidity_min_gen = invalidity_min_generation
+        self._cooldown_cycles = cooldown_cycles
+        self._excluded_events: set[str] = set(excluded_events or ())
+
+        # State between calls
+        self._previous_snapshots: dict[str, RunSnapshot] = {}
+        # Cooldown tracking: (alert_type, run_label) -> cycles_remaining
+        self._cooldowns: dict[tuple[str, str], int] = {}
+        self._cycle_count = 0
+
+    def check(self, snapshots: list[RunSnapshot]) -> list[Alert]:
+        """Check all snapshots for alerts.
+
+        Args:
+            snapshots: Current cycle's RunSnapshots.
+
+        Returns:
+            List of Alert objects. May be empty if no issues detected
+            or all alerts are in cooldown.
+        """
+        self._cycle_count += 1
+        raw_alerts: list[Alert] = []
+
+        for snap in snapshots:
+            label = snap.run_spec.label
+            log = logger.bind(component="alerts", run=label)
+
+            # --- Stall detection (multi-signal) ---
+            prev = self._previous_snapshots.get(label)
+            if prev is not None and snap.is_stalled(prev):
+                log.warning(
+                    f"Stall detected: gen={snap.generation}, "
+                    f"running={snap.running_programs}, total={snap.total_programs}"
+                )
+                raw_alerts.append(
+                    Alert(
+                        alert_type=AlertType.STALL,
+                        severity=AlertSeverity.WARN,
+                        run_label=label,
+                        message=(
+                            f"Run {label} stalled at gen {snap.generation}: "
+                            f"no generation advancement, no running programs, "
+                            f"no new submissions."
+                        ),
+                        details={
+                            "generation": snap.generation,
+                            "running_programs": snap.running_programs,
+                            "total_programs": snap.total_programs,
+                        },
+                    )
+                )
+
+            # --- Crash detection ---
+            if snap.pid is not None and snap.pid_alive is False:
+                log.error(f"Crash detected: PID {snap.pid} is not alive")
+                raw_alerts.append(
+                    Alert(
+                        alert_type=AlertType.CRASH,
+                        severity=AlertSeverity.ERROR,
+                        run_label=label,
+                        message=f"Run {label} process (PID {snap.pid}) is not alive.",
+                        details={"pid": snap.pid},
+                    )
+                )
+
+            # --- High invalidity ---
+            inv_rate = snap.invalid_rate
+            if (
+                inv_rate is not None
+                and inv_rate > self._invalidity_threshold
+                and snap.generation is not None
+                and snap.generation >= self._invalidity_min_gen
+            ):
+                pct = inv_rate * 100
+                log.warning(f"High invalidity: {pct:.0f}% at gen {snap.generation}")
+                raw_alerts.append(
+                    Alert(
+                        alert_type=AlertType.HIGH_INVALIDITY,
+                        severity=AlertSeverity.WARN,
+                        run_label=label,
+                        message=(
+                            f"Run {label}: {pct:.0f}% invalid programs at gen "
+                            f"{snap.generation} -- stage_timeout is likely too "
+                            f"short for this eval workload."
+                        ),
+                        details={
+                            "invalid_rate": inv_rate,
+                            "generation": snap.generation,
+                            "total_programs": snap.total_programs,
+                            "valid_programs": snap.valid_programs,
+                        },
+                    )
+                )
+
+            # --- Event rate zero (Track B4, generic) ---
+            for alert in self._event_rate_zero_alerts(snap):
+                log.warning(str(alert))
+                raw_alerts.append(alert)
+
+        # --- Completion detection (global, not per-run) ---
+        if snapshots and all(snap.completed for snap in snapshots):
+            reasons = {
+                s.run_spec.label: s.completion_reason or "unknown" for s in snapshots
+            }
+            gen_summary = ", ".join(
+                f"{s.run_spec.label}={s.generation}" for s in snapshots
+            )
+            logger.bind(component="alerts").info(
+                "Experiment complete: all runs signaled completion"
+            )
+            raw_alerts.append(
+                Alert(
+                    alert_type=AlertType.COMPLETION,
+                    severity=AlertSeverity.INFO,
+                    run_label="experiment",
+                    message=(
+                        f"All {len(snapshots)} runs completed: "
+                        f"{gen_summary}. Reasons: {reasons}"
+                    ),
+                    details={
+                        "run_generations": {
+                            s.run_spec.label: s.generation for s in snapshots
+                        },
+                        "run_reasons": reasons,
+                    },
+                )
+            )
+
+        # --- Apply cooldowns ---
+        alerts = self._apply_cooldowns(raw_alerts)
+
+        # --- Update state for next cycle ---
+        for snap in snapshots:
+            self._previous_snapshots[snap.run_spec.label] = snap
+
+        return alerts
+
+    def _event_rate_zero_alerts(self, snap: RunSnapshot) -> list[Alert]:
+        """Generic predicate: one alert per canonical event observed on this
+        snapshot whose ``expected_after_gen`` threshold has been crossed by
+        the run's generation AND whose minute-window count is zero.
+
+        Iterates ``snap.event_window_counts`` (what was actually measured),
+        not the full registry — we only alert on signals we collected. This
+        keeps the predicate scoped: an event the collector didn't sample
+        stays silent, so adding new canonical events is safe even before
+        the collector is taught to poll them.
+
+        Each alert is tagged with a ``cooldown_discriminator`` of
+        ``{run_label}:{event_name}`` so one zero-rate event doesn't suppress
+        another on the same run — the cooldown tracker stays generic and
+        never looks at ``alert_type``.
+
+        Events with ``expected_after_gen=0`` never trigger (would spam for
+        GENERATION_BOUNDARY-class events that fire from the very first
+        tick). Snapshots with no event counts collected (e.g. Redis
+        unreachable at collect time) are silent, preserving backward
+        compatibility.
+        """
+        # Imported lazily so tests that register scratch events after module
+        # import still appear in the registry snapshot.
+        from gigaevo.monitoring.events import CANONICAL_EVENTS
+
+        if snap.event_window_counts is None:
+            return []
+        if snap.generation is None:
+            return []
+
+        alerts: list[Alert] = []
+        for name, count in snap.event_window_counts.items():
+            cls = CANONICAL_EVENTS.get(name)
+            if cls is None:
+                continue
+            if name in self._excluded_events:
+                continue
+            threshold = getattr(cls, "expected_after_gen", 0) or 0
+            if threshold <= 0:
+                continue
+            if snap.generation < threshold:
+                continue
+            if count > 0:
+                continue
+            health_q = getattr(cls, "health_question", "") or ""
+            alerts.append(
+                Alert(
+                    alert_type=AlertType.EVENT_RATE_ZERO,
+                    severity=AlertSeverity.WARN,
+                    run_label=snap.run_spec.label,
+                    message=(
+                        f"Run {snap.run_spec.label}: event {name} count is 0 at "
+                        f"gen {snap.generation} (expected after gen "
+                        f"{threshold}). {health_q}".rstrip()
+                    ),
+                    details={
+                        "event_name": name,
+                        "generation": snap.generation,
+                        "expected_after_gen": threshold,
+                        "count": count,
+                        "health_question": health_q,
+                    },
+                    cooldown_discriminator=f"{snap.run_spec.label}:{name}",
+                )
+            )
+        return alerts
+
+    def _apply_cooldowns(self, raw_alerts: list[Alert]) -> list[Alert]:
+        """Filter alerts through cooldown tracker.
+
+        Each (alert_type, discriminator) pair gets a cooldown counter,
+        where ``discriminator`` is ``alert.cooldown_discriminator`` when set
+        and ``alert.run_label`` otherwise. This keeps the tracker generic:
+        emitters opt in to finer-grained suppression by populating the
+        discriminator field — the tracker never inspects ``alert_type``.
+
+        On each call: first filter alerts (suppress if counter > 0),
+        then decrement only pre-existing counters (NOT newly set ones).
+
+        Semantics: cooldown_cycles=N means the alert fires, then is
+        suppressed for the next N consecutive check() calls, then
+        fires again on call N+2.
+        Example with cooldown_cycles=2:
+          Call 1: fires (counter set to 2)
+          Call 2: suppressed (counter 2 -> 1)
+          Call 3: suppressed (counter 1 -> 0, deleted)
+          Call 4: fires again
+        """
+        emitted: list[Alert] = []
+        new_keys: set[tuple[str, str]] = set()
+        for alert in raw_alerts:
+            discriminator = alert.cooldown_discriminator or alert.run_label
+            key = (alert.alert_type.value, discriminator)
+            if key in self._cooldowns:
+                logger.bind(component="alerts").debug(
+                    f"Suppressed {alert.alert_type} for {discriminator} "
+                    f"(cooldown: {self._cooldowns[key]} cycles remaining)"
+                )
+                continue
+            emitted.append(alert)
+            self._cooldowns[key] = self._cooldown_cycles
+            new_keys.add(key)
+
+        # 2. Decrement only pre-existing cooldowns (skip newly set ones)
+        expired_keys = []
+        for key in list(self._cooldowns.keys()):
+            if key in new_keys:
+                continue  # newly set this cycle -- start decrementing next cycle
+            self._cooldowns[key] -= 1
+            if self._cooldowns[key] <= 0:
+                expired_keys.append(key)
+        for key in expired_keys:
+            del self._cooldowns[key]
+
+        return emitted
+
+
+class ModelDriftRule:
+    """Anomaly detector rule: probe LiteLLM /models endpoint to verify expected model.
+
+    Standalone callable rule, not part of AlertDetector.
+    Designed to be called by WatchdogEngine when model_drift_check is enabled.
+    """
+
+    def __init__(self, timeout: int = 15):
+        self._timeout = timeout
+
+    def check(
+        self,
+        run_label: str,
+        mutation_url: str,
+        expected_model: str,
+        api_key: str = "None",
+    ) -> Alert | None:
+        """Probe the /models endpoint. Returns Alert if expected model not found, None if OK."""
+        import json
+        import urllib.request
+
+        try:
+            req = urllib.request.Request(
+                f"{mutation_url}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                data = json.loads(resp.read())
+            model_ids = [m.get("id", "") for m in data.get("data", [])]
+            if expected_model in model_ids:
+                return None
+            return Alert(
+                alert_type=AlertType.MODEL_DRIFT,
+                severity=AlertSeverity.WARN,
+                run_label=run_label,
+                message=(
+                    f"Run {run_label}: {mutation_url} no longer serves "
+                    f"{expected_model}. Available: {model_ids[:5]}"
+                ),
+                details={
+                    "url": mutation_url,
+                    "expected": expected_model,
+                    "available": model_ids,
+                },
+            )
+        except Exception as exc:
+            return Alert(
+                alert_type=AlertType.MODEL_DRIFT,
+                severity=AlertSeverity.WARN,
+                run_label=run_label,
+                message=(
+                    f"Run {run_label}: model drift check failed "
+                    f"for {mutation_url}: {exc}"
+                ),
+                details={
+                    "url": mutation_url,
+                    "expected": expected_model,
+                    "error": str(exc),
+                },
+            )

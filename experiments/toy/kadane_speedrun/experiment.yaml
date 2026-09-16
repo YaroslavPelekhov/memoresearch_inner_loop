@@ -1,0 +1,103 @@
+schema_version: 2
+contract:
+  identity:
+    name: toy/kadane_speedrun
+    task: toy
+    branch: exp/toy-kadane-speedrun
+    prereg_commit: null
+    pr_number: null
+    tracking_issue: 108
+  problem:
+    has_test_set: false
+    test_set_path: null
+    test_set_sha256: null
+    max_val_test_gap: null
+    fitness_type: fractional
+    metric_name: fitness
+  config:
+    num_parents: 1
+    max_elites_per_generation: 2
+    max_mutations_per_generation: 2
+    stage_timeout: 120
+    dag_timeout: 300
+    mutation_mode: rewrite
+    significant_change: 0.01
+  runs:
+  - label: R1
+    db: 15
+    prefix: toy_kadane
+    pipeline: standard
+    problem_name: toy_kadane
+    condition: Gemini Flash on Kadane's algorithm
+    chain_url: null
+    mutation_url: https://openrouter.ai/api/v1
+    model_name: openai/gpt-4o-mini
+    pid: 24883
+    log_path: run_R1.log
+  - label: R2
+    db: 14
+    prefix: toy_kadane
+    pipeline: standard
+    problem_name: toy_kadane
+    condition: Gemini Flash on Kadane's algorithm
+    chain_url: null
+    mutation_url: https://openrouter.ai/api/v1
+    model_name: openai/gpt-4o-mini
+    pid: 24884
+    log_path: run_R2.log
+  servers:
+  - openrouter.ai
+  custom_env: {}
+  max_generations: 3
+  stopping_rule:
+    description: ''
+    conditions: []
+    enforce_at: checkpoint
+  baseline:
+    reference: null
+    mean: null
+    metric: null
+  tools: []
+lifecycle:
+  status: complete
+  launch:
+    time: '2026-03-21T10:05:06.822636+00:00'
+    commit: 045414623fc32cb65167b6700fe7940f45fcfca4
+    confirmed_at: null
+  smoke_test:
+    completed: true
+    db: 15
+    generations: 3
+    log_path: smoke_R1.log
+    completed_at: '2026-03-21T10:03:05Z'
+  treatment_verification: {}
+telemetry:
+  checkpoints:
+  - gen: 3
+    timestamp: '2026-03-21T10:08:31.644308+00:00'
+    run_metrics:
+    - label: R1
+      gen: 3
+      best_fitness: 1.0
+    - label: R2
+      gen: 3
+      best_fitness: 1.0
+    notes: Both runs reached fitness=1.0 at gen 1. Pipeline dry run successful.
+  mid_run_test_eval: {}
+  checkpoint_analysis: {}
+  treatment_checks:
+    completed: false
+    results: []
+control_plane:
+  watchdog: {}
+  notifications:
+    pr:
+      enabled: true
+      comment_mode: rolling
+    telegram:
+      enabled: true
+      chat_id_env: TELEGRAM_CHAT_ID
+      token_env: TELEGRAM_BOT_TOKEN
+  watchdog_pid: null
+  anomaly_detector_cron_id: null
+  checkpoint_cron_id: null

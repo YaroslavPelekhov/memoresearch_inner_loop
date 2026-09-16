@@ -1,0 +1,245 @@
+version: 1
+description: >
+  Repo-harness seed repository for the Heilbronn triangle problem. The candidate
+  artifact is solution.py, which must implement entrypoint() and return an
+  11-by-2 NumPy coordinate array inside the unit-area equilateral triangle.
+  This is a closed-book task: mutation agents must not use internet search,
+  external coordinate tables, published solutions, or remembered exact
+  Heilbronn configurations.
+  Mutation agents should make concise algorithmic changes and avoid long local
+  evaluations or broad coordinate-search runs; the GigaEvo outer loop performs
+  candidate evaluation and selection.
+default_variant: grid
+variants:
+  grid:
+    description: Mildly perturbed triangular grid baseline.
+    files:
+      README.md:
+        content: |
+          # Heilbron Repo-Harness Seed
+
+          Implement `entrypoint()` in `solution.py`. It must return an
+          `(11, 2)` NumPy array of points inside the unit-area equilateral
+          triangle. The benchmark imports the canonical task helper and
+          validator from `problems/heilbron`.
+
+          Closed-book rule: do not use internet search, external coordinate
+          tables, published solutions, or remembered exact Heilbronn
+          configurations. Derive candidates from this repository, the local
+          benchmark feedback, and local computation only.
+
+          Mutation guidance: make concise algorithmic changes to `solution.py`.
+          Do not spend mutation time on long local evaluations, broad numerical
+          searches, or expensive multi-start optimization runs. A single cheap
+          benchmark or sanity check is enough; GigaEvo will evaluate candidates.
+      solution.py:
+        content: |
+          import random
+
+          from helper import get_unit_triangle
+          import numpy as np
+
+          np.random.seed(42)
+          random.seed(42)
+
+
+          def entrypoint() -> np.ndarray:
+              tri = get_unit_triangle()
+              A, B, C = tri
+              points = []
+              rows = 5
+              count = 0
+              for row in range(rows):
+                  num_points = rows - row
+                  v = (row + 0.5) / rows
+                  for i in range(num_points):
+                      if count >= 11:
+                          break
+                      u = (i + 0.5) / num_points * (1 - v)
+                      P = (1 - u - v) * A + u * B + v * C
+                      perturbation = np.random.uniform(-0.001, 0.001, size=2)
+                      P = P + perturbation
+                      points.append(P)
+                      count += 1
+                  if count >= 11:
+                      break
+              return np.array(points)
+  random_arr:
+    description: Uniform random barycentric sample baseline with fixed seed.
+    files:
+      README.md:
+        content: |
+          # Heilbron Repo-Harness Seed
+
+          Implement `entrypoint()` in `solution.py`. It must return an
+          `(11, 2)` NumPy array of points inside the unit-area equilateral
+          triangle. The benchmark imports the canonical task helper and
+          validator from `problems/heilbron`.
+
+          Closed-book rule: do not use internet search, external coordinate
+          tables, published solutions, or remembered exact Heilbronn
+          configurations. Derive candidates from this repository, the local
+          benchmark feedback, and local computation only.
+
+          Mutation guidance: make concise algorithmic changes to `solution.py`.
+          Do not spend mutation time on long local evaluations, broad numerical
+          searches, or expensive multi-start optimization runs. A single cheap
+          benchmark or sanity check is enough; GigaEvo will evaluate candidates.
+      solution.py:
+        content: |
+          import random
+
+          from helper import get_unit_triangle
+          import numpy as np
+
+          np.random.seed(42)
+          random.seed(42)
+
+
+          def entrypoint() -> np.ndarray:
+              tri = get_unit_triangle()
+              A, B, C = tri
+              points = []
+              for _ in range(11):
+                  r1 = np.random.rand()
+                  r2 = np.random.rand()
+                  if r1 + r2 > 1:
+                      r1, r2 = 1 - r1, 1 - r2
+                  P = (1 - r1 - r2) * A + r1 * B + r2 * C
+                  points.append(P)
+              return np.array(points)
+  cluster:
+    description: Center plus small circular cluster baseline.
+    files:
+      README.md:
+        content: |
+          # Heilbron Repo-Harness Seed
+
+          Implement `entrypoint()` in `solution.py`. It must return an
+          `(11, 2)` NumPy array of points inside the unit-area equilateral
+          triangle. The benchmark imports the canonical task helper and
+          validator from `problems/heilbron`.
+
+          Closed-book rule: do not use internet search, external coordinate
+          tables, published solutions, or remembered exact Heilbronn
+          configurations. Derive candidates from this repository, the local
+          benchmark feedback, and local computation only.
+
+          Mutation guidance: make concise algorithmic changes to `solution.py`.
+          Do not spend mutation time on long local evaluations, broad numerical
+          searches, or expensive multi-start optimization runs. A single cheap
+          benchmark or sanity check is enough; GigaEvo will evaluate candidates.
+      solution.py:
+        content: |
+          import random
+
+          from helper import get_unit_triangle
+          import numpy as np
+
+          np.random.seed(42)
+          random.seed(42)
+
+
+          def entrypoint() -> np.ndarray:
+              tri = get_unit_triangle()
+              A, B, C = tri
+              center = (A + B + C) / 3
+              points = [center]
+              radius = 0.2 * np.linalg.norm(B - A)
+              for i in range(10):
+                  angle = 2 * np.pi * i / 10
+                  offset = np.array([np.cos(angle), np.sin(angle)]) * radius
+                  P = center + offset
+                  alpha, beta, gamma = np.linalg.solve(
+                      np.column_stack([A - C, B - C]), (P - C)
+                  ).tolist() + [1]
+                  if any(v < 0 for v in [alpha, beta, 1 - alpha - beta]):
+                      P = center
+                  points.append(P)
+              return np.array(points)
+  fan:
+    description: Centroid fan baseline.
+    files:
+      README.md:
+        content: |
+          # Heilbron Repo-Harness Seed
+
+          Implement `entrypoint()` in `solution.py`. It must return an
+          `(11, 2)` NumPy array of points inside the unit-area equilateral
+          triangle. The benchmark imports the canonical task helper and
+          validator from `problems/heilbron`.
+
+          Closed-book rule: do not use internet search, external coordinate
+          tables, published solutions, or remembered exact Heilbronn
+          configurations. Derive candidates from this repository, the local
+          benchmark feedback, and local computation only.
+
+          Mutation guidance: make concise algorithmic changes to `solution.py`.
+          Do not spend mutation time on long local evaluations, broad numerical
+          searches, or expensive multi-start optimization runs. A single cheap
+          benchmark or sanity check is enough; GigaEvo will evaluate candidates.
+      solution.py:
+        content: |
+          import random
+
+          from helper import get_unit_triangle
+          import numpy as np
+
+          np.random.seed(42)
+          random.seed(42)
+
+
+          def entrypoint() -> np.ndarray:
+              tri = get_unit_triangle()
+              A, B, C = tri
+              center = (A + B + C) / 3
+              points = [center]
+              for i in range(10):
+                  t = i / 10
+                  edge = A * (1 - t) + B * t if i % 2 == 0 else B * (1 - t) + C * t
+                  mid = (center + edge) / 2
+                  points.append(mid)
+              return np.array(points)
+  arc:
+    description: Simple edge-blend arc baseline.
+    files:
+      README.md:
+        content: |
+          # Heilbron Repo-Harness Seed
+
+          Implement `entrypoint()` in `solution.py`. It must return an
+          `(11, 2)` NumPy array of points inside the unit-area equilateral
+          triangle. The benchmark imports the canonical task helper and
+          validator from `problems/heilbron`.
+
+          Closed-book rule: do not use internet search, external coordinate
+          tables, published solutions, or remembered exact Heilbronn
+          configurations. Derive candidates from this repository, the local
+          benchmark feedback, and local computation only.
+
+          Mutation guidance: make concise algorithmic changes to `solution.py`.
+          Do not spend mutation time on long local evaluations, broad numerical
+          searches, or expensive multi-start optimization runs. A single cheap
+          benchmark or sanity check is enough; GigaEvo will evaluate candidates.
+      solution.py:
+        content: |
+          import random
+
+          from helper import get_unit_triangle
+          import numpy as np
+
+          np.random.seed(42)
+          random.seed(42)
+
+
+          def entrypoint() -> np.ndarray:
+              tri = get_unit_triangle()
+              A, B, C = tri
+              points = []
+              for i in range(11):
+                  t = i / 10
+                  P1 = (1 - t) * A + t * B
+                  P2 = (1 - t) * B + t * C
+                  blend = (P1 + P2) / 2
+                  points.append(blend)
+              return np.array(points)

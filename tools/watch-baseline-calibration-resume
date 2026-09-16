@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# One-shot recovery from a calibration controller that predates a bug fix.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+baseline_target="${AUTORESEARCH_BASELINE_TMUX_TARGET:-baseline-calibration:0.0}"
+lease_target="${AUTORESEARCH_GPU_LEASE_TMUX_TARGET:-gpu1-lease:0.0}"
+poll_seconds="${AUTORESEARCH_RESUME_POLL_SECONDS:-20}"
+deadline_epoch="${AUTORESEARCH_DEADLINE_EPOCH:-1787935358}"
+summary_path="$repo_root/runs/baseline-calibration/summary.json"
+
+baseline_command="cd $repo_root && exec ./tools/launch-baseline-calibration >> runs/baseline-calibration/launcher.log 2>&1"
+lease_command="cd $repo_root && exec ./tools/launch-gpu1-lease >> runs/gpu1-lease.log 2>&1"
+
+refresh_lease() {
+    # Refresh the lease before the replacement launcher reaches GPU work; the
+    # lease binds ownership to concrete pane ancestry.
+    if tmux has-session -t "${lease_target%%:*}" 2>/dev/null; then
+        tmux respawn-pane -k -t "$lease_target" "$lease_command"
+    else
+        tmux new-session -d -s "${lease_target%%:*}" "$lease_command"
+    fi
+}
+
+while (( $(date +%s) < deadline_epoch )); do
+    if [[ -f "$summary_path" ]]; then
+        echo "Calibration summary exists; recovery is unnecessary."
+        exit 0
+    fi
+
+    if ! tmux has-session -t "${baseline_target%%:*}" 2>/dev/null; then
+        echo "Calibration session exited without a summary; recreating it."
+        tmux new-session -d -s "${baseline_target%%:*}" "$baseline_command"
+        refresh_lease
+        echo "Calibration and GPU lease sessions were recreated once."
+        exit 0
+    fi
+
+    pane_dead="$(tmux display-message -p -t "$baseline_target" '#{pane_dead}')"
+    if [[ "$pane_dead" == "1" ]]; then
+        echo "Calibration pane exited without a summary; loading patched controller."
+        tmux respawn-pane -k -t "$baseline_target" "$baseline_command"
+        refresh_lease
+        echo "Calibration and GPU lease panes were respawned once."
+        exit 0
+    fi
+
+    sleep "$poll_seconds"
+done
+
+echo "Autoresearch deadline passed before calibration recovery was needed."
+exit 0

@@ -1,0 +1,20 @@
+# @package _global_
+
+# Repo-aware multi-parent selection. The LLM ranks complementary parent sets;
+# the selector falls back to its deterministic heuristic if that call fails.
+parent_selector:
+  _target_: gigaevo.evolution.mutation.parent_selector.MetaRepoParentSelector
+  num_parents: ${num_parents}
+  primary_key: ${primary_key}
+  higher_is_better: ${higher_is_better}
+  task_description: ${ref:problem_context::task_description}
+  llm: ${ref:llm}
+  source_repo: ${repo_harness.effective_source_repo}
+  max_candidate_count: 12
+  # The ranked list is the complete mutation portfolio for one generation.
+  max_ranked_sets: ${max_mutations_per_generation}
+  max_prompt_tokens: 150000
+  prompt_token_encoding: o200k_base
+  max_diff_chars: 12000
+  max_reflection_chars: 5000
+  fail_open: true

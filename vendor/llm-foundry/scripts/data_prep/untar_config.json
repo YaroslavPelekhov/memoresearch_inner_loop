@@ -1,0 +1,7 @@
+{
+  "source_dir": "/path/to/source_dir",
+  "dest_dir": "/path/to/dest_dir",
+  "task_name": "name_of_task_file",
+  "n_proc": 1,
+  "num_executors": 1
+}

@@ -1,0 +1,49 @@
+# @package _global_
+
+defaults:
+  - _base
+
+# The curated archive does not use a MAP-Elites behavior space. Deterministic
+# admission still checks state, metrics, validity, and mutation context.
+required_behavior_keys:
+  _target_: gigaevo.config.helpers.extract_behavior_keys_from_islands
+  island_configs: []
+
+mutation_operator:
+  _target_: gigaevo.evolution.mutation.repo_harness_operator.RepoHarnessMutationOperator
+  source_repo: ${repo_harness.effective_source_repo}
+  backend: ${repo_harness.mutation_backend}
+  worktree_root: ${repo_harness.mutation_worktree_root}
+  log_root: ${repo_harness.mutation_log_root}
+  entrypoint: ${repo_harness.entrypoint}
+  branch_prefix: ${repo_harness.branch_prefix}
+  timeout: ${repo_harness.mutation_timeout}
+  smoke_commands: ${repo_harness.smoke_commands}
+  smoke_timeout: ${repo_harness.smoke_timeout}
+  smoke_shell: ${repo_harness.smoke_shell}
+  allow_no_changes: ${repo_harness.allow_no_changes}
+  keep_worktrees: ${repo_harness.keep_mutation_worktrees}
+  max_feedback_chars: ${repo_harness.max_feedback_chars}
+  max_parent_diff_chars: ${repo_harness.max_parent_diff_chars}
+  max_parent_reflection_chars: ${repo_harness.max_parent_reflection_chars}
+  allowed_changed_files: ${repo_harness.allowed_changed_files}
+  active_idea_path: ${repo_harness.active_idea_path}
+
+evolution_strategy:
+  _target_: gigaevo.evolution.strategies.repo_archival_curator.RepoHarnessArchivalCuratorStrategy
+  program_storage: ${ref:redis_storage}
+  llm: ${ref:llm}
+  task_description: ${ref:problem_context::task_description}
+  metrics_context: ${metrics_context}
+  source_repo: ${repo_harness.effective_source_repo}
+  capacity: ${archival_curator.capacity}
+  primary_key: ${primary_key}
+  higher_is_better: ${higher_is_better}
+  max_prompt_tokens: ${archival_curator.max_prompt_tokens}
+  prompt_token_encoding: ${archival_curator.prompt_token_encoding}
+  max_diff_chars: ${archival_curator.max_diff_chars}
+  max_reflection_chars: ${archival_curator.max_reflection_chars}
+  max_raw_feedback_chars: ${archival_curator.max_raw_feedback_chars}
+  protect_champion: ${archival_curator.protect_champion}
+  enable_quarantine: ${archival_curator.enable_quarantine}
+  fail_open: ${archival_curator.fail_open}

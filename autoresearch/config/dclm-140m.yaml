@@ -1,0 +1,278 @@
+# Fixed experiment contract. Candidate code cannot edit this file.
+# Human-controlled for baseline noise calibration; candidate overlays cannot
+# modify it. Architecture comparisons freeze this after calibration.
+seed: ${oc.decode:${oc.env:AUTORESEARCH_SEED,2048}}
+max_seq_len: 2048
+run_name: ${oc.env:RUN_NAME,dclm-140m-baseline}
+
+model_path: ${oc.env:DCLM_MODEL_PATH}
+model:
+  name: gigar_causal_lm
+  init_device: cpu
+  pretrained: false
+  pretrained_model_name_or_path: ${model_path}
+  config_overrides:
+    max_position_embeddings: ${max_seq_len}
+    # DCLM's public GPT-NeoX tokenizer has 50,277 tokens. Pad the model
+    # vocabulary to a tensor-friendly multiple of 128, as LLM Foundry does.
+    vocab_size: 50304
+    bos_token_id: 0
+    eos_token_id: 0
+    pad_token_id: 0
+    hidden_size: 640
+    intermediate_size: 1728
+    num_attention_heads: 10
+    num_hidden_layers: 16
+    num_key_value_heads: 10
+    rms_norm_eps: 1.0e-5
+    rope_theta: 10000.0
+    initializer_range: 0.02
+    init_type: dclm
+    z_loss_eps: 5.0e-6
+    apply_qk_norm: true
+    use_cache: false
+    return_dict: false
+    tp_size: 1
+    use_liger: false
+    fused_mlp: false
+    attention_bias: false
+    attention_type: LlamaAttention
+    parallel_embedding_type: EmbeddingParallelEmbedding
+
+    # The fixed decoder owns the Transformer/GDN placement. Evolution can edit
+    # only autoresearch/model/gdn.py, so full-attention layers and the training
+    # loop cannot drift with a candidate.
+    decoder_layer_module: autoresearch.model.hybrid_decoder
+    decoder_layer_type: AutoresearchHybridDecoderLayer
+    decoder_layer_kwargs: {}
+
+    # GDN dimensions are fixed. The immutable hybrid decoder owns the even/odd
+    # layer placement; the mutable GDN implementation owns its gate behavior.
+    linear_key_head_dim: 128
+    linear_value_head_dim: 128
+    linear_conv_kernel_dim: 4
+    linear_num_key_heads: 4
+    linear_num_value_heads: 4
+
+# Checked immediately after LLM Foundry instantiates the model. Keep candidate
+# capacity within +/-1% of the 143,801,024-parameter hybrid baseline so CORE changes
+# cannot be explained by a materially different model scale.
+parameter_count_bounds: [142363014, 145239034]
+
+tokenizer:
+  # This is the tokenizer used by DCLM's reference training recipe.
+  name: ${oc.env:DCLM_TOKENIZER,EleutherAI/gpt-neox-20b}
+
+# One-GPU initial contract. GPU count is a launcher parameter, not evolved state.
+global_train_batch_size: 16
+device_train_microbatch_size: 2
+device_eval_batch_size: 1
+tp_size: 1
+sp_size: 1
+varlen_input: false
+enable_async_tp: false
+fsdp_config: null
+
+# The human-owned default is a 1B-token screening run: 30,518 batches at
+# 32,768 tokens/batch. Confirmation uses DCLM's 1x protocol of 20
+# tokens/parameter: the exact target is 2,874,216,960 tokens and rounding up to
+# 87,770 batches consumes 2,876,047,360, for the measured 143,801,024-parameter
+# baseline. Candidates cannot edit either setting.
+max_duration: ${oc.env:AUTORESEARCH_MAX_DURATION,30518ba}
+eval_interval: ${oc.env:AUTORESEARCH_EVAL_INTERVAL,30518ba}
+eval_before_train: skip
+eval_subset_num_batches: -1
+
+# Source: https://huggingface.co/datasets/mlfoundations/dclm-baseline-1.0
+# LLM Foundry consumes its normal tokenized Mosaic Streaming (MDS) form.
+train_loader:
+  name: text
+  eos_token_id: 0
+  sft_mode: false
+  dataset:
+    streams:
+      dclm-baseline:
+        local: ${oc.env:DCLM_MDS_PATH}
+        split: ${oc.env:DCLM_TRAIN_SPLIT,dclm-baseline-1.0}
+        # Leave epoch_size and stream weights unset. Mosaic Streaming then
+        # visits every physical MDS sequence once per epoch instead of
+        # upsampling this pinned subset to the full public-corpus epoch size.
+    shuffle: true
+    shuffle_algo: py1e
+    shuffle_seed: ${seed}
+    max_seq_len: ${max_seq_len}
+    fim_rate: 0.0
+  drop_last: true
+  num_workers: 1
+
+# A physically disjoint MDS split prepared by tools/prepare-dclm-holdout.py.
+# Short scientific screens use only this evaluator and remove the CORE tasks
+# from their effective configuration. CORE remains the final-run metric.
+eval_loader:
+  name: text
+  eos_token_id: 0
+  sft_mode: false
+  dataset:
+    streams:
+      fixed-heldout:
+        local: ${oc.env:DCLM_SCREEN_MDS_PATH,${oc.env:DCLM_MDS_PATH}}
+        split: ${oc.env:DCLM_SCREEN_VALIDATION_SPLIT,validation}
+    shuffle: false
+    shuffle_seed: 99173
+    max_seq_len: ${max_seq_len}
+    fim_rate: 0.0
+  drop_last: false
+  num_workers: 1
+eval_loader_metric_names:
+  - LanguageCrossEntropy
+
+optimizer:
+  name: decoupled_adamw
+  # Corrected one-EOS corpus runs invalidated 1.25e-3 and every tested higher
+  # setting. Scientific runs always receive the selected LR explicitly from
+  # the calibration handoff. Keep direct/manual runs on the conservative
+  # failure-triggered anchor until calibration publishes its final default.
+  # The candidate overlay cannot modify this value.
+  lr: ${oc.decode:${oc.env:AUTORESEARCH_LR,0.75e-3}}
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  weight_decay: 1.0e-4
+
+scheduler:
+  # Warmup-Stable-Decay over the same total step budget and peak optimizer LR.
+  # Warm up for the original ~25%, remain at peak through 90%, then use the
+  # final 10% for cosine decay. The run ends at 10% of peak rather than zero so
+  # a longer continuation still has useful learning-rate headroom.
+  name: stacked
+  schedule_rows:
+    - [0.25, 1.0, linear]
+    - [0.90, 1.0, linear]
+    - [1.00, 0.10, cosine]
+
+algorithms:
+  gradient_clipping:
+    clipping_type: norm
+    clipping_threshold: 1.0
+    diagnostics:
+      enabled: true
+      # One inexpensive global scalar sample per optimization batch.
+      log_interval: 1
+
+# The exact LLM Foundry English DCLM CORE group from the supplied config.
+cached_datasets_directory_template: ${oc.env:DCLM_EVAL_CACHE_PATH}
+eval_gauntlet:
+  weighting: EQUAL
+
+icl_tasks:
+  - label: hellaswag_zeroshot
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/language_understanding/hellaswag.jsonl
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: arc_easy
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/world_knowledge/arc_easy.jsonl
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: "
+    gauntlet_tags: [core]
+  - label: arc_challenge
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/world_knowledge/arc_challenge.jsonl
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: "
+    gauntlet_tags: [core]
+  - label: copa
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/commonsense_reasoning/copa.jsonl
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: commonsense_qa
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/commonsense_reasoning/commonsense_qa.jsonl
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: piqa
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/commonsense_reasoning/piqa.jsonl
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: "
+    gauntlet_tags: [core]
+  - label: openbook_qa
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/commonsense_reasoning/openbook_qa.jsonl
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: lambada_openai
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/language_understanding/lambada_openai.jsonl
+    num_fewshot: [0]
+    icl_task_type: language_modeling
+    gauntlet_tags: [core]
+  - label: hellaswag-10shot
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/language_understanding/hellaswag.jsonl
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: winograd
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/language_understanding/winograd_wsc.jsonl
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: [core]
+  - label: winogrande
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/language_understanding/winogrande.jsonl
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: [core]
+  - label: bigbench_language_identification
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/language_understanding/bigbench_language_identification.jsonl
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: agi_eval_lsat_ar
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/symbolic_problem_solving/agi_eval_lsat_ar.jsonl
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: agi_eval_lsat_lr
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/reading_comprehension/agi_eval_lsat_lr.jsonl
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: [core]
+  - label: boolq
+    dataset_uri: ${oc.env:DCLM_CORE_PATH}/reading_comprehension/boolq.jsonl
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: "
+    gauntlet_tags: [core]
+
+precision: amp_bf16
+dist_timeout: 1800
+zero_nan_grads: false
+progress_bar: false
+log_to_console: true
+console_log_interval: 20ba
+use_clearml: false
+
+callbacks:
+  speed_monitor:
+    window_size: 10
+  lr_monitor: {}
+  runtime_estimator: {}
+  # Native LLM Foundry/Composer convention. This adds post-clipping global and
+  # per-parameter gradient norms plus Adam parameter/moment/update metrics.
+  optimizer_monitor:
+    log_optimizer_metrics: true
+    batch_log_interval: 10
+
+loggers:
+  tensorboard:
+    log_dir: ${oc.env:AUTORESEARCH_RUN_ROOT,./runs}/tensorboard
+    rank_zero_only: true
+
+# Screening runs consume only the final evaluation metrics.  Disabling Composer
+# checkpoints avoids serializing model configuration objects (including
+# OmegaConf ListConfig values) and saves unnecessary I/O at the end of a run.
+save_folder: null
+load_weights_only: false
+load_strict_model_weights: true
+autoresume: false
+auto_log_hparams: false

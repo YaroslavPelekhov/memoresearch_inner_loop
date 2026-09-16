@@ -1,0 +1,1169 @@
+max_seq_len: 8192
+global_seed: 42
+
+# Fill defaults
+
+run_name:
+exp_name:
+user:
+
+tensorboard_path: /home/jovyan/${user}/tensorboard_test/${exp_name}
+save_folder: /home/jovyan/${user}/checkpoints/${exp_name}/${run_name}
+
+eos_token_id: 2
+varlen_input: false
+enable_async_tp: false  # enables async tensor parallelism
+zero_nan_grads: false
+tp_size: 1
+sp_size:
+  - sp_size: 1
+    max_seq_len: ${max_seq_len}
+
+# !!! num_attention_heads is mandatory for job_dispatcher_callback callback !!!
+num_attention_heads: 32
+
+# # Model LLaMa-7B
+model_path: /home/jovyan/models/llama2-7b-fp16-TheBloke-extended_tok-cc_10k
+model:
+  name: gigar_causal_lm
+  init_device: cpu
+  pretrained: false
+  pretrained_model_name_or_path: ${model_path}
+  config_overrides:
+    max_position_embeddings: ${max_seq_len}
+
+    # apply_qk_norm: true  # `false` by default. Enables applying QK normalization before RoPE and attention.
+    # z_loss_eps: 5e-6  # Z-loss scale, 0.0 by default. Enables Z-loss calculation if value is > 0.
+
+    # Initialization type:
+    # - giga -- Giga init (xavier_normal_, gain=1.0) (default)
+    # - deepseek -- DeepSeek init (normal_, std=0.006, `deepseek_init_std` controlled config parameter)
+    # - dclm -- DCLM-style depth-scaled truncated normal init
+    # - olmo3 -- OLMo3/nGPT-style normalized + depth-scaled init
+    # init_type: giga
+
+    # LayerNorm placement in decoder blocks:
+    # - pre -- pre-norm only (Llama style) (default)
+    # - post -- post-norm only (OLMo 3 style)
+    # - pre_post -- both pre- and post-norm (Gemma 2/3 style)
+    # layernorm_type: pre
+
+    ### non transformers agruments
+    tp_size: ${tp_size}
+    use_liger: false
+    fused_mlp: false
+    fused_mlp_checkpoint_lvl: 0
+    # Hard SwiGLU activation clipping bound (DeepSeek style).
+    # 0.0 disables; > 0 clamps gate to <=L and up to [-L, L] before SwiGLU.
+    # Applies to fused dense FP8 path (LlamaMLP).
+    # swiglu_limit: 10
+    # Enable fused dense MLP SwiGLU + FP8 quantization.
+    # When true: fp8_config.include_linear_layers MUST cover gate_proj/up_proj/down_proj.
+    # float8_dense_fused_swiglu_quant: true
+    activation_checkpoint_layers_num: null
+    loss_inplace_backward: false
+    attention_hidden_size: null # if null, then attention_hidden_size = hidden_size
+    attention_bias: false # if true, then enables biases in Q,K,V linear layers
+    # freeze_non_embed: false # if true, then freezes all Gigar weights except embed weights. It only works with Gigar model.
+    attention_type: LlamaPackedAttention  # Use LlamaPackedRingAttention to use ring attention implementation in SP case
+    # llama3_ring_heads_k_stride: 1 # Number of KV heads processed together in a single iteration in llama3-ring-attention.
+
+    # # MLA
+    # attention_type: LlamaLatentAttention
+    # apply_torch_compile_to_projections: false
+    # use_custom_rotary_kernel: false
+    # qk_nope_head_dim: 64
+    # qk_rope_head_dim: 64
+    # v_head_dim: 128
+    # kv_lora_rank: 16
+    # q_lora_rank: 16
+
+    # Hybrid Model (Linear attention config)
+    linear_attention_type: null  # Set to null to disable hybrid attention (all layers use full attention).
+                                 # To enable a hybrid model, set this to one of:
+                                 #   ["Qwen3NextGatedDeltaNet", "KimiDeltaAttention"].
+                                 # In hybrid mode, layers listed in full_attention_layers
+                                 # use full attention (attention_type actually); all other layers use linear_attention_type.
+    full_attention_layers: [
+      1,
+      3,
+      5,
+      7,
+      9,
+      11,
+      13,
+      15,
+      17,
+      19,
+      21,
+      23,
+      25,
+      27,
+    ] # Indices of transformer layers that always use full attention, [0, ..., num_layers - 1]
+    linear_key_head_dim: 128 # Per-head dimensionality of query/key projections
+    linear_value_head_dim: 128 # Per-head dimensionality of value projections
+                               # For KimiDeltaAttention, this must be equal to linear_key_head_dim
+    linear_conv_kernel_dim: 4  # Kernel size for the convolution used inside the linear attention
+    linear_num_key_heads: 16   # Number of query/key heads
+    linear_num_value_heads: 16 # Number of value heads, >= linear_num_key_heads
+    linear_use_short_conv: true # If true, use the "short" convolution variant from FLA
+                                # else: packed conv1d
+
+    parallel_embedding_type: EmbeddingParallelEmbedding  # in case of tp_size > 1, can be set to VocabParallelEmbedding (not recommended)
+
+    # # rope scaling example
+    # rope_scaling:
+    #   factor: 8.0
+    #   low_freq_factor: 1.0
+    #   high_freq_factor: 4.0
+    #   original_max_position_embeddings: 8192
+    #   rope_type: "llama3"
+
+# FULL SHARD
+global_train_batch_size: 512
+device_train_microbatch_size: 1
+device_eval_batch_size: 1
+
+# Short-run debug profile for startup, launcher, and data-path smoke tests.
+# Keep disabled in normal training. See sber_configs/README.md for more examples.
+debug:
+  use_debug: false
+  startup_speedups:
+    use_one_train_dataloader: true
+    train_stream_name: null
+    disable_runtime_benchmark_callbacks: true
+    disable_eval_loader: true
+    icl_tasks_metrics: null
+    disable_all_evaluators: false
+    load_checkpoints: false
+    fast_model_init: true
+  overrides:
+    max_duration: 1ba
+    save_interval: 10ba
+    console_log_interval: 1ba
+    global_train_batch_size: 4
+    device_train_microbatch_size: 1
+    device_eval_batch_size: 1
+    train_loader:
+      num_workers: 0
+      dataset:
+        use_dummy: true
+        epoch_size: 8
+
+# Tokenizer
+tokenizer:
+  name: /home/jovyan/tokenizers/hf_128000_v17_extra_gpt4o_digits_code_500_latex_spaces #${model_path}
+  # kwargs:
+  #   model_max_length: ${max_seq_len}
+    # legacy: true
+    # use_fast: false
+
+autometrics:
+  globals: ${rp.load:autometrics/globals/default.yml}
+  inference: ${rp.load:autometrics/inference/10b.yml}
+  convertation: ${rp.load:autometrics/convertation/MoE_all.yml}
+  preparation: ${rp.load:autometrics/preparation/default.yml}
+  router: ${rp.load:autometrics/router/default.yml}
+  evaluators:
+    lm_eval: ${rp.load:autometrics/lm_eval/all_lm_eval.yml}
+    obm: ${rp.load:autometrics/obm/all_obm_devices.yml}
+
+# Dataloaders
+train_loader:
+  name: text
+  enable_data_profiler: true
+  eos_token_id: ${eos_token_id}
+  sft_mode: false
+  # CURRICULUM LEARNING
+  # curriculum: true
+  # force ignore shuffling data, stream proportions
+  # streams will load in one after another in confer order
+
+  dataset:
+    epoch_size: 1062M  # 8.7T tokens epoch
+    fim_rates:
+      vanilla_fim: 0.0
+      inline_fim: 0.0
+      multiline_fim: 0.0
+      syntax_aware_fim: 0.0
+    # DUMMY DATA
+    # use_dummy: true  # Running dummy dataset with random tokens. If used, `streams` (bottom block) and `tokenizer` may not be provided.
+    # dataset_size: 2048  # If `epoch_size` not provided, dataset size set to `dataset_size`.
+                          # If `dataset_size` and `epoch_size` not provided, `dataset_size` set to 1e24.
+                          # If `dataset_size` and `epoch_size` provided, raise will be called
+    streams:
+      # MULTILING
+      portuguese:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.6
+          proportion: 1.0
+          split: portuguese
+      arabic:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.6
+          proportion: 2.0
+          split: arabic
+      uz_texts:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.6
+          proportion: 0.1
+          split: uz_texts
+      kk_texts:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.6
+          proportion: 0.2
+          split: kk_texts
+      # CODE
+      starcoder2_filtered_vocab_rarity:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/4.0
+          proportion: 15.0
+          split: starcoder2_filtered_vocab_rarity
+      synthetic_python_filtered_no_leaks:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/test_data
+          proportion: 0.5
+          split: synthetic_python_filtered_no_leaks
+      # MATH
+      # llemma_algebraic_stack_sharded:
+      #     local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+      #     proportion: 0.0
+      #     split: llemma_algebraic_stack_sharded
+      # llemma_open_web_math_sharded:
+      #     local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+      #     proportion: 0.0
+      #     split: llemma_open_web_math_sharded
+      numina_cot:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/4.0
+          proportion: 0.055
+          split:  AI-MO_NuminaMath-CoT__train-merged_tasks
+      numina_tir:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/4.0
+          proportion: 0.007
+          split:  AI-MO_NuminaMath-TIR__train-merged_tasks
+      synthetic_simple_math:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/test_data
+          proportion: 0.44
+          split: synthetic_simple_math
+      # OTHER
+      libgen_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+          proportion: 3.0
+          split:  libgen_sharded
+      libgen_nougat_mathpix_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.6
+          proportion: 8.0
+          split: libgen_nougat_mathpix_sharded
+      libgen_fiction_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+          proportion: 2.0
+          split: libgen_fiction_sharded
+      libgen_scihub_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/test_data
+          proportion: 1.0
+          split: libgen_scihub_sharded
+      # cyberleninka_sharded:
+      #     local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/test_data
+      #     proportion: 0.0
+      #     split: cyberleninka_sharded
+      # arxiv_sharded:
+      #     local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+      #     proportion: 0.0
+      #     split: arxiv_sharded
+      wikiquote:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+          proportion: 0.005
+          split: wikiquote
+      wikipedia_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+          proportion: 3.5
+          split: wikipedia_sharded
+      tribe_juridicial_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+          proportion: 1.5
+          split: tribe_juridicial_sharded
+      tribe_factoring_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.6
+          proportion: 0.002
+          split: tribe_factoring_sharded
+      tribe_medical_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.6
+          proportion: 0.05
+          split: tribe_medical_sharded
+      tribe_musdigest_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+          proportion: 0.05
+          split: tribe_musdigest_sharded
+      pubmed_sharded:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+          proportion: 1.0
+          split: pubmed_sharded
+      # stackexchange_sharded:
+      #     local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/3.5
+      #     proportion: 0.0
+      #     split: stackexchange_sharded
+      # WEB
+      dclm-baseline-1.0:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/test_data
+          proportion: 46.6
+          split: dclm-baseline-1.0
+      rucc_filtered_dclm_0.5:
+          local: /home/jovyan/datasets/GigaSets/tokenized/8k_context_128k_digits_tokenizer/test_data
+          proportion: 15.0
+          split: rucc_filtered_dclm_0.5
+    shuffle: true
+    max_seq_len: ${max_seq_len}
+    shuffle_seed: ${global_seed}
+  drop_last: true
+  num_workers: 1
+
+
+# eval_loader:
+#   eos_token_id: ${eos_token_id}
+#   name: text
+#   dataset:
+#     remote: /home/jovyan/malkolesov/llm-foundry/scripts/train/my-copy-c4
+#     split: val_small
+#     shuffle: false
+#     max_seq_len: ${max_seq_len}
+#     shuffle_seed: ${global_seed}
+#   drop_last: false
+#   num_workers: 5
+
+
+# Optimization
+scheduler:
+  name: cosine_with_warmup
+  t_warmup: 2000ba
+  alpha_f: 0.1
+
+optimizer:
+  name: decoupled_adamw
+  lr: 3.0e-4
+  betas:
+  - 0.9
+  - 0.95
+  eps: 1.0e-08
+  weight_decay: 3.0e-5  # wd_article * lr = 0.1 * 3e-4
+
+  # only decoupled_fused_adamw params
+  # state_dtype: float
+  # num_layers_compile: 2
+
+  # param_groups:
+  #   - param_str_match: "norm"
+  #     lr: 1e-4
+  #     weight_decay: 0.0
+  #   - param_str_match: "lm_head"
+  #     lr: 6e-4
+  #     weight_decay: 6.0e-5
+  # disable_grad: ["layers.1", "layers.5.self_attn.qkv", "model.norm"]
+
+# Algorithms
+algorithms:
+  gradient_clipping:
+    clipping_type: norm
+    clipping_threshold: 1.0
+
+profiler:
+  use_profiler: false
+  ranks_to_profile: [0, 1]  # list of ranks to profile, if "all" or empty, will profile all ranks
+  annotation:
+    enable: true
+    backend: "record_function"  # available annotation backends: "nvtx", "torch_nvtx" or "record_function"
+    # NOTE:
+    # nvtx requires installed package nvxt
+    # torch_nvtx annotation works only with nsight systems
+  trace_handlers:
+    - name: json
+      params:
+      # composer.profiler.JSONTraceHandler kwargs
+        folder: ${tensorboard_path}/${run_name}/composer_profiler
+        merged_trace_filename: null
+        merged_trace_remote_file_name: null
+        overwrite: true
+        num_traces_to_keep: -1
+
+  cyclic_schedule:
+    # composer.profiler.cyclic_schedule kwargs
+    #  Number of batches to skip profiling at epoch start
+    skip_first: 110
+    #  For each profiling cycle, number of batches to skip at the beginning of the cycle.
+    wait: 10
+    #  For each profiling cycle, number of batches to be in the warmup state after skipping
+    #   ``wait`` batches
+    warmup: 2
+    #  For each profiling cycle, number of batches to record after warming up.
+    active: 2
+    #  Number of profiling cycles to perform per epoch
+    repeat: 1
+
+  profiler_overrides:
+    # composer.profiler.Profiler kwargs
+    # BASE
+    torch_prof_folder: ${tensorboard_path}/${run_name}/torch_profiler
+    torch_prof_overwrite: true
+    torch_prof_num_traces_to_keep: -1
+    sys_prof_stats_thread_interval_seconds: 0.5
+    # METRICS
+    # sys
+    sys_prof_cpu: false
+    sys_prof_memory: false
+    sys_prof_disk: false
+    sys_prof_net: false
+    # torch
+    torch_prof_record_shapes: false
+    torch_prof_profile_memory: false
+    torch_prof_with_stack: false
+    torch_prof_memory_filename: null
+
+
+max_duration: 750000ba # 3Т tokens
+eval_interval: 1000ba
+eval_before_train: regular # one of [skip, force, regular]
+eval_subset_num_batches: -1
+
+# Checkpoint to local filesystem or remote object store
+save_interval: 1000ba
+# If specified only every `stable_save_interval`-th checkpoint will be considered as "stable" and preserved
+# the rest will be considered as "quick" and deleted after the creation of a new checkpoint
+# `stable_save_interval` must be divisible by `save_interval`
+# `stable_save_interval` must be set to null if not used
+# note: only checkpoints created during a given launch will be deleted
+stable_save_interval: null
+
+load_weights_only: false
+# save_num_checkpoints_to_keep: 1  # Important, this cleans up checkpoints saved to DISK
+# save_folder: s3://my-bucket/my-folder/{run_name}/checkpoints
+
+# System
+seed: ${global_seed}
+precision: amp_bf16
+dist_timeout: 1800
+
+# ---- Select ONE fsdp setup ----
+# ---- Comment another one ----
+
+# GigaFSDP
+gigafsdp_config:
+  load_monolith_rank0_only: false
+  state_dict_type: local
+  sync_module_states: false
+  all_reduce_grads_across_model_parallel_group: ${enable_async_tp}
+  separate_layer_norm_disabled: false
+  # --- optional gigafsdp params ---
+  # hpz_first_layers_num: 40
+  # hpz_group_size: 4
+  # hybrid_group_size: 256
+  # save_gigafsdp_sharded_folder_path: "..."
+  # zero_stage: 3  # zero-1 and zero-2 are also available
+
+  activation_checkpointing: false
+  activation_checkpointing_reentrant: false
+  activation_cpu_offload: false # Currently only enables CPU offload of saved inputs for activation checkpointing
+
+  mixed_precision:
+    param_dtype: bf16
+    buffer_dtype: fp32
+    reduce_dtype: fp32
+
+# FSDP
+# fsdp_config:
+#   ## Use with sharded checkpoint
+#   # state_dict_type: sharded
+#   # use_orig_params: true
+
+#   ## Use with monolith checkpoint
+#   load_monolith_rank0_only: true
+#   use_orig_params: false
+
+#   sync_module_states: true
+#   sharding_strategy: FULL_SHARD
+#   mixed_precision:
+#     param_dtype: bf16
+#     reduce_dtype: fp32
+#     buffer_dtype: fp32
+#   activation_cpu_offload: false
+#   activation_checkpointing: false
+#   activation_checkpointing_reentrant: true
+#   limit_all_gathers: true
+#   verbose: false
+#   tp_size: ${tp_size}
+#   backward_prefetch: BACKWARD_PRE
+
+# FP8 for dense projections.
+# - include_linear_layers: regex for linear projections to be quantized
+# - include_shared_quantizers: regex for shared quantizers, which are used for shared activations in block (in SwiGLU, etc.)
+# fp8_config:
+#   include_linear_layers: ".*\\.(gate_proj|up_proj|down_proj)$"
+#   include_shared_quantizers: ".*\\.(mlp)"
+
+
+# Logging
+date: null
+loggers:
+  console:
+    enabled: true
+    log_interval: 50ba
+    stream: stderr
+    log_traces: false
+  tensorboard:
+    enabled: true
+    log_dir: ${tensorboard_path}
+    rank_zero_only: true
+  # wandb:
+  #   name: ${run_name}-${date}
+  #   project: ${exp_name}
+  #   group: null
+  #   entity: null
+  #   tags: null
+  #   log_artifacts: false
+  #   rank_zero_only: true
+  #   save_folder: ${save_folder}
+  #   init_kwargs:
+  #     notes: "Heya"
+  #     config: null
+
+timers:
+  # timers_threshold is an upper bound on timer levels to aggregate statistics:
+  # timer_level = 0 - all timers disabled
+  # timer_level = 1 - aggregates avg and calls every interval steps
+  # timer_level = 2 - aggregates avg, calls, min and max every interval steps
+  # timer_level = 3 - aggregates avg, calls, min, max and interrank aggregation every interval steps
+  # if timer_level > timers_threshold, timer_level will be decreased to timers_threshold
+  timers_threshold: 1
+  interval: 50            # timers aggregation interval, causes CPU-GPU syncs for CUDA-timers and for timers_threshold == 3 does collective communications
+
+callbacks:
+  online_profiler:
+    signal_dir: ${tensorboard_path}/${run_name}/_signal_files
+    poll_interval_batches: 50
+  system_metrics_monitor:
+    log_interval_batches: 50
+    log_gpu_metrics: false
+    log_cpu_percentage: true
+    log_cpu_memory: true
+    log_swap_memory: false
+    log_disk_memory: true
+    log_disk_io: false
+    log_network_io: false
+  speed_monitor:
+    window_size: 10
+  stage_time_profiler: {}
+  lr_monitor: {}
+  memory_monitor: {}
+  runtime_estimator: {}
+  optimizer_monitor:
+    batch_log_interval: 100
+  # autometrics:
+  #   eval_interval: ${eval_interval}
+  #   stable_save_interval: ${stable_save_interval}
+  #   nnodes: 8
+  #   user: ${user}
+  #   sglang_tag: custom
+  # activation_monitor:
+  #   interval: 100ba
+  #   only_log_wandb: false
+  #   keep_only_module_types: ['qkv_proj', 'o_proj', 'down_proj']
+  #   ignore_module_types: ['_tp_linear_submodule']
+  #   log_module_output: false # log module output or not (by default we log only input to selected modules)
+  #   log_gradients: true
+  #   log_grad_input: false # log grad_input at backward or not (by default we log only grad_output of selected modules)
+  #   stat_list: ['amax', 'amean'] # 'min', 'amin', 'l2norm', average, kurtosis
+  scheduled_gc:
+    batch_interval: 100
+  training_metrics_monitor:
+    batch_log_interval: 500
+  parallelism_consistency_callback:
+    batch_interval: 100
+  data_profiler:
+    log_interval: 100
+  # mono_ckpt_saver:
+  #   batch_interval: ${save_interval}
+  #   save_folder: ${save_folder}
+  # memory_stats_saver:
+  #   collect_memory_snapshot: true
+  #   folder: '${tensorboard_path}/{run_name}/memory_stats_saver'
+  #   save_interval: 2ba
+  # job_dispatcher_callback: will delete soon
+  #   username: ${user}
+  #   # signal_files_path: # optional, for development purposes only, captured from region_config
+  #   tokenizer_path: ${tokenizer.name}
+  #   eval_interval: ${eval_interval}
+  #   convertation:
+  #     n_gpus: 8
+  #     # base_image: # optional, for development purposes only, captured from daemon
+  #     # tp_size: ${tp_size} # optional, captured from artifacts
+  #     # mappers: # optional, automatically selected from checkpoint (fsdp, gigafsdp or hf)
+  #     #  - map_gigafsdp_to_hf
+  #   num_attention_heads: ${num_attention_heads}
+  #   # keys in job_list (e.g., general_tasks) are for readability purposes only. Values - lists of "allowed" metrics (for which default configuration exists) separated by whitespace.
+  #   job_list:
+  #     general_tasks: bbh arc truthfulqa drop race triviaqa agieval commonsense_qa lambada openbookqa
+  #     math_and_science: piqa gsm8k mathqa mgsm minerva_math gpqa
+  #     code: humaneval mbpp
+  #     multilingual: xcopa xwinograd xstorycloze pawsx
+  #     long_context: longbench passkey
+  #   job_params_override:
+  #     # !!! Key should be one of longbench or passkey or starts with "lm_eval" (for lm eval metrics, lm_eval_10_shot_minerva for example) !!!
+  #     longbench:
+  #       max_length: 8192
+  #       model_dtype: fp16
+  #       n_gpus: 1
+  #       model_name: gigachat-gigar-vllm
+  #     passkey:
+  #       model_dtype: bf16
+  #       n_gpus: 1
+  #     lm_eval_10_shot_minerva:
+  #       model_type: vllm
+  #       model_args: dtype=bfloat16,trust_remote_code=True
+  #       tasks: minerva_math
+  #       num_fewshot: 10
+  #       batch_size: auto
+  #       n_gpus: 8
+  # ema_weights:
+  #   alpha: 0.01
+  #   update_period: 10
+  #   # Positive integer value of the step from which EMA updates will start.
+  #   # EMA weights are set to training weights on `start_batch`
+  #   # if `start_batch_force_update` is not set to `False`.
+  #   start_batch: 1
+  #   # (!!!) Set to `false` to disable EMA weights force update with training weights on `start_batch` step.
+  #   # Should be used in case of continuing training from the loaded checkpoint with
+  #   # `load_weights_only: true`.Otherwise EMA weights would be lost.
+  #   start_batch_force_update: true  # `true` by default
+  job_dispatcher_callback_web: # callback will be use instead of job_dispatcher_callback
+    username: ${user}
+    convertation:
+      n_gpus: 8
+      input_tp_size: ${tp_size}
+    save_hf_in_ckpt_dir: true
+    tokenizer_path: ${tokenizer.name}
+    eval_interval: ${eval_interval}
+    s3_dest: gigaeye-s3:gigaeye-pretrain-checkpoints/gigachat_checkpoints/jd_data
+    rclone_path: /workspace/job-dispatcher-utils/s3-interaction/rclone
+    rclone_config: /workspace/job-dispatcher-utils/s3-interaction/rclone.conf
+  #   jobs:
+  #     - sam:
+  #         pass_obm: false
+  #         pass_obb: true
+  #         pass_judge: false
+  #         obb_datasets: []
+  #         obm_datasets: []
+  #         obm_groups: []
+  #         reasoning: false
+  #         chatmlv3: false
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "bbh"
+  #         "num_fewshot": "3"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "arc_easy,arc_challenge"
+  #         "num_fewshot": "25"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "truthfulqa_mc1,truthfulqa_mc2,truthfulqa_gen"
+  #         "num_fewshot": "0"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "drop"
+  #         "num_fewshot": "3"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "race"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "triviaqa"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "agieval"
+  #         "num_fewshot": "0"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "commonsense_qa"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "lambada"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "openbookqa"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "piqa"
+  #         "num_fewshot": "0"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "gsm8k"
+  #         "num_fewshot": "4"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "mathqa"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "mgsm_direct,mgsm_cot_native"
+  #         "num_fewshot": "8"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "minerva_math"
+  #         "num_fewshot": "4"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "gpqa"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "humaneval"
+  #         "num_fewshot": "0"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "mbpp"
+  #         "num_fewshot": "0"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "xcopa"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "xwinograd"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "xstorycloze"
+  #         "num_fewshot": "0"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - lm_eval:
+  #         "model_type": "vllm"
+  #         "model_args": "dtype=bfloat16,trust_remote_code=True,max_num_seqs=8,max_model_len=8192,tensor_parallel_size=4,gpu_memory_utilization=0.5"
+  #         "tasks": "pawsx"
+  #         "num_fewshot": "5"
+  #         "batch_size": "auto"
+  #         "n_gpus": "4"
+  #     - longbench:
+  #         model_dtype: fp16
+  #         max_length: 8192
+  #         model_name: gigachat-gigar-vllm
+  #         n_gpus: 4
+  #     - passkey:
+  #         model_dtype: bf16
+  #         n_gpus: 4
+
+
+auto_log_hparams: false
+autoresume: true
+
+# Save checkpoint asynchronously during training
+save_checkpoint_async: false
+# Compute hashes for saved/loaded checkpoints and check for corruption
+compute_checkpoint_hashes: true
+
+# If the parameters of your model do not fully match the parameters of the checkpoint,
+# this will lead to an error in load_state_dict or sharding process (with gigafsdp).
+# If your model has additional parameters that are initialized separately and not loaded via load_path,
+# then you need to set false here.
+load_strict_model_weights: true
+
+# Load from local filesystem or remote object store
+# load_path: /home/jovyan/vmamedov/checkpoints_prod/gigar2_29B_8k/ep1-ba626000-rank0-tokenizer-extended-64.pt
+# load_path: s3://my-bucket/my-folder/gpt-7b/checkpoints/latest-rank{rank}.pt
+
+# BENCHMARKS
+#cached_datasets_directory_template: null # default paths are already in scripts/train.py
+
+# Allows you to aggregate metrics using gauntlet_tags
+eval_gauntlet:
+  weighting: EQUAL
+  # this allows you to average aggregations from gauntlet_tags
+  averages:
+    ru_en_average:
+    - ru
+    - en
+
+icl_tasks:
+  - label: mmlu
+    dataset_uri: /home/jovyan/vmamedov/mmlu/all
+    # each num_fewshot is separate dataloader
+    num_fewshot: [0, 5]
+    icl_task_type: mmlu
+    ####################
+    # only for mmlu
+    # be careful, because the settings
+    # applied to all dataloaders in this tasks
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: false
+    max_seq_len: 4096
+    # it can have one, several, or none values.
+    gauntlet_tags: ['en']
+    ####################
+  - label: teenmmlu
+    dataset_uri: /home/jovyan/metrics/mmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [0, 5]
+    icl_task_type: teenmmlu
+    ####################
+    # only for mmlu
+    # be careful, because the settings
+    # applied to all dataloaders in this tasks
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: false
+    max_seq_len: 4096
+    gauntlet_tags: ['en']
+    ####################
+  - label: mmlu-pro
+    dataset_uri: /home/jovyan/metrics/mmlu-pro
+    # each num_fewshot is separate dataloader
+    num_fewshot: [0, 5]
+    icl_task_type: mmlu
+    choice_num2symbol:
+       0: A
+       1: B
+       2: C
+       3: D
+       4: E
+       5: F
+       6: G
+       7: H
+       8: I
+       9: J
+    ####################
+    # only for mmlu
+    # be careful, because the settings
+    # applied to all dataloaders in this tasks
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: false
+    max_seq_len: 4096
+    gauntlet_tags: ['en']
+    ####################
+  - label: fakemmlu
+    dataset_uri: /home/jovyan/metrics/fakemmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: fakemmlu
+    max_seq_len: 1024
+    gauntlet_tags: ['en']
+  - label: babymmlu
+    dataset_uri: /home/jovyan/metrics/babymmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: babymmlu
+    max_seq_len: 2048
+    gauntlet_tags: ['ru']
+  - label: rummlu
+    dataset_uri: /home/jovyan/metrics/rummlu-new
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: rummlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: biommlu
+    dataset_uri: /home/jovyan/metrics/biommlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: biommlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: medmmlu
+    dataset_uri: /home/jovyan/metrics/medmmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: medmmlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: chemmmlu
+    dataset_uri: /home/jovyan/metrics/chemmmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: chemmmlu
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+  - label: mathmmlu
+    dataset_uri: /home/jovyan/metrics/mathmmlu
+    # each num_fewshot is separate dataloader
+    num_fewshot: [5]
+    icl_task_type: mathmmlu
+    max_seq_len: 4096 #, says 4k is too small, there are larger samples
+    gauntlet_tags: ['ru', 'math']
+  - label: ruopenbookqa
+    dataset_uri: /home/jovyan/metrics/ruopenbookqa.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    max_seq_len: 2048
+    gauntlet_tags: ['ru']
+  - label: boolq
+    dataset_uri: /home/jovyan/metrics/boolq.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    max_seq_len: 2048
+    gauntlet_tags: ['en']
+  - label: hellaswag
+    dataset_uri: /home/jovyan/metrics/hellaswag.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    max_seq_len: 1024
+    gauntlet_tags: ['en']
+  - label: ruworldtree
+    dataset_uri: /home/jovyan/metrics/ruworldtree.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    max_seq_len: 2048
+    gauntlet_tags: ['ru']
+  - label: winogrande
+    dataset_uri: /home/jovyan/metrics/winogrande.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: schema
+    max_seq_len: 2048
+    gauntlet_tags: ['en']
+  - label: gsm8k-8shot
+    dataset_uri: /home/jovyan/metrics/gsm8k_prepended_8shot.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot: [0]
+    icl_task_type: question_answering
+    cot_delimiter: "The answer is "
+    continuation_delimiter: "\n\nA:"
+    question_prelimiter: ""
+    do_normalization: false
+    max_seq_len: 2048
+    early_stopping_criteria:
+    - "\n\n"
+    - "Question:"
+    gauntlet_tags: ['en', 'math']
+  - label: rulang-0.3
+    dataset_uri: /home/jovyan/metrics/rulang-0.3
+    # each num_fewshot is separate dataloader
+    num_fewshot: [2]
+    icl_task_type: mmlu
+    prompt_string: "Ниже приведены вопросы с множественным выбором по {subject}."
+    prompt_answer_template: "Ответ:"
+    choice_num2symbol:
+        0: "1"
+        1: "2"
+        2: "3"
+        3: "4"
+        4: "5"
+        5: "6"
+        6: "7"
+        7: "8"
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: false
+    max_seq_len: 4096
+    gauntlet_tags: ['ru']
+### Core Metrics
+  - label: hellaswag_zeroshot
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/language_understanding/hellaswag.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: arc_easy
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/world_knowledge/arc_easy.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+  - label: arc_challenge
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/world_knowledge/arc_challenge.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+  - label: copa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/commonsense_reasoning/copa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: commonsense_qa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/commonsense_reasoning/commonsense_qa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: piqa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/commonsense_reasoning/piqa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+  - label: openbook_qa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/commonsense_reasoning/openbook_qa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: lambada_openai
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/language_understanding/lambada_openai.jsonl"
+    num_fewshot: [0]
+    icl_task_type: language_modeling
+    gauntlet_tags: ['core']
+  - label: hellaswag-10shot
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/language_understanding/hellaswag.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: winograd
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/language_understanding/winograd_wsc.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['core']
+  - label: winogrande
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/language_understanding/winogrande.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['core']
+  - label: bigbench_language_identification
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/language_understanding/bigbench_language_identification.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: agi_eval_lsat_ar
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/symbolic_problem_solving/agi_eval_lsat_ar.jsonl"
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: agi_eval_lsat_lr
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/reading_comprehension/agi_eval_lsat_lr.jsonl"
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['core']
+  - label: boolq
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/reading_comprehension/boolq.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['core']
+### ru core metrics
+  - label: ru_hellaswag_zeroshot
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/hellaswag.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_arc_easy
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/arc_easy.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['ru-core']
+  - label: ru_arc_challenge
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/arc_challenge.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['ru-core']
+  - label: ru_copa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/copa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_commonsense_qa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/commonsense_qa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_piqa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/piqa.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers
+    gauntlet_tags: ['ru-core']
+  - label: ru_openbook_qa
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/openbook_qa.jsonl"
+    num_fewshot: [0]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_lambada_openai
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/lambada_openai.jsonl"
+    num_fewshot: [0]
+    icl_task_type: language_modeling
+    gauntlet_tags: ['ru-core']
+  - label: ru_hellaswag
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/hellaswag.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_winograd
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/winograd_wsc.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['ru-core']
+  - label: ru_winogrande
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/winogrande.jsonl"
+    num_fewshot: [0]
+    icl_task_type: schema
+    gauntlet_tags: ['ru-core']
+  - label: ru_agi_eval_lsat_ar
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/agi_eval_lsat_ar.jsonl"
+    num_fewshot: [3]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+  - label: ru_boolq
+    dataset_uri: "/home/jovyan/metrics/dclm_local_data/ru_core_metrics/boolq.jsonl"
+    num_fewshot: [10]
+    icl_task_type: multiple_choice
+    gauntlet_tags: ['ru-core']
+    continuation_delimiter: "\nAnswer: " # this separates questions from answers

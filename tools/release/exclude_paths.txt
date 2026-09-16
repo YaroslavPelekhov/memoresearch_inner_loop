@@ -1,0 +1,47 @@
+# Paths to exclude from public release (used by sync_public.sh)
+# One path per line. Directories must end with /
+
+# Internal research data
+experiments/
+
+# Claude Code machine-specific state
+.claude/
+
+# Internal experimental protocol
+docs/protocol/
+
+# Experiment lifecycle automation
+tools/experiment/
+
+# Internal benchmarks
+tools/benchmarks/
+
+# This directory (self-excluding)
+tools/release/
+
+# Build artifacts
+build/
+
+# Runtime outputs
+outputs/
+
+# Internal dev instructions
+CLAUDE.md
+
+# Secrets
+.env
+
+# Internal tools
+tools/benchmark.py
+tools/benchmark_capture.py
+tools/benchmark_history.jsonl
+tools/bench_snapshot.py
+tools/csv_comparison.py
+tools/csv_memory_comparison.py
+tools/litellm.sh
+tools/litellm_bench.py
+tools/llm_contention_bench.py
+tools/optimization_log.md
+
+# Config with internal IPs
+config/llm/balanced.yaml

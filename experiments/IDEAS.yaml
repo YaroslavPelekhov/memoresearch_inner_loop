@@ -1,0 +1,851 @@
+schema_version: 1
+ideas:
+- id: hover_001
+  title: 'Gradient-signal fitness: LLM critique replaces binary improvement signal'
+  task: hover
+  status: queued
+  rank: 0.91
+  hypothesis: 'Improver stagnation is caused by binary improvement signal (did fitness
+    go up or not?) which provides zero gradient near Constructor optima. Replacing
+    with an LLM-generated critique of each attempt (structured: what was tried, why
+    it failed, what to try instead) provides richer feedback that breaks stagnation.
+
+    '
+  mechanism: New fitness shaping hook in PostRunHook that generates LLM critique per
+    iteration
+  expected_effect: Constructor fitness +2-5pp; Improver un-stagnates
+  estimated_cost: 4 runs × 50 gen
+  source: retrospective
+  created: '2026-04-09'
+  builds_on: []
+  contradicts: []
+  alternative_to:
+  - hover_002
+  notes: 'Confirmed pattern: ''Improver stagnation is structural, not feedback-dependent''
+    (3 adversarial experiments). But ALL prior attempts used CODE feedback (K=1, K=3).
+    This idea proposes CRITIQUE feedback instead, which is different in kind.
+
+    '
+  literature_refs:
+  - TextGrad (Yuksekgonul et al. 2024) — gradient through text
+  - OPRO (Yang et al. 2023) — LLM as optimizer
+- id: hover_002
+  title: 'Parsed adversarial critique: K=3 with structured parsing before injection'
+  task: hover
+  status: queued
+  rank: 0.83
+  hypothesis: 'Opponent context minimum effective dose is K≥3 (confirmed). But raw
+    K=3 code injection may cause LLM over-anchoring. Parsing the opponent code into
+    a structured critique (topology decisions, retrieval choices, key differences)
+    before injecting provides the right level of abstraction — enough to guide mutation,
+    not enough to copy.
+
+    '
+  mechanism: New prompt preprocessing step in adversarial mutation operator
+  expected_effect: Improver fitness +3-8pp over K=3 baseline
+  estimated_cost: 4 runs × 50 gen
+  source: retrospective
+  created: '2026-04-09'
+  builds_on:
+  - hover_adversarial_v2
+  contradicts: []
+  alternative_to:
+  - hover_001
+  notes: 'Pattern: K=3 > K=0 > K=1. Ordering suggests structured context > raw code.'
+  literature_refs:
+  - R&D-Agent (Chen et al. 2024) — separate research from development
+- id: hover_003
+  title: 'Topology curriculum: start 2-hop, unlock 3-hop after fitness plateau'
+  task: hover
+  status: queued
+  rank: 0.76
+  hypothesis: 'Dynamic topology is confirmed to work (+8.5pp). But evolution may get
+    stuck in 2-hop local optima because 3-hop is harder to improve. A curriculum that
+    starts with 2-hop only and unlocks 3-hop after gen 10 (or fitness plateau) may
+    produce better final chains.
+
+    '
+  mechanism: Fitness-triggered topology unlock in validate.py or custom stage
+  expected_effect: +3-6pp over static dynamic topology
+  estimated_cost: 4 runs × 60 gen
+  source: retrospective
+  created: '2026-04-09'
+  builds_on: []
+  contradicts: []
+  alternative_to: []
+  notes: Inspired by curriculum learning literature.
+  literature_refs:
+  - Bengio et al. 2009 — curriculum learning
+- id: hover_004
+  title: 'Steady-state with MAP-Elites soft archive: fitness+diversity co-optimization'
+  task: hover
+  status: queued
+  rank: 0.71
+  hypothesis: 'Current steady-state engine uses MAP-Elites with a single fitness metric.
+    Adding a diversity dimension (e.g., retrieval depth distribution, program AST
+    distance) to the archive cells may produce more robust programs and avoid fitness
+    plateaus.
+
+    '
+  mechanism: New behavior characterization function + expanded archive cell definition
+  expected_effect: +2-4pp and lower variance across runs
+  estimated_cost: 4 runs × 50 gen
+  source: literature
+  created: '2026-04-09'
+  builds_on: []
+  contradicts:
+  - hover_map_elites_topology
+  alternative_to: []
+  notes: 'Prior experiment hover/map-elites-topology was NULL (p=0.413). That used
+    3D structural topology as characterization. This uses AST distance, which is different
+    in kind (behavioral, not structural). Needs Volkov to assess whether this avoids
+    the confound.
+
+    '
+  literature_refs:
+  - MAP-Elites (Mouret & Clune 2015)
+  - FunSearch (Romera-Paredes et al. 2023)
+- id: hotpotqa_001
+  title: 'F1-aware mutation prompts: teach mutator to optimize F1, not exact match'
+  task: hotpotqa
+  status: queued
+  rank: 0.78
+  hypothesis: 'Current fitness is F1 score but mutation prompts focus on answer correctness.
+    Explicitly telling the mutator "optimize for partial matches and token overlap"
+    may produce programs better calibrated to the F1 metric.
+
+    '
+  mechanism: Custom mutation prompt override in problems/chains/hotpotqa/
+  expected_effect: +2-4pp F1
+  estimated_cost: 4 runs × 50 gen
+  source: human
+  created: '2026-04-09'
+  builds_on: []
+  contradicts: []
+  alternative_to: []
+  notes: 'Low-risk: config-only change.'
+  literature_refs: []
+- id: hotpotqa_002
+  title: Bridge entity extraction as explicit intermediate stage
+  task: hotpotqa
+  status: on_hold
+  rank: 0.62
+  hypothesis: 'HotpotQA requires bridge entity identification. Adding an explicit
+    bridge extraction stage to the chain (rather than having the LLM do it implicitly)
+    may improve multi-hop accuracy significantly.
+
+    '
+  mechanism: New DAG stage in problems/chains/hotpotqa/
+  expected_effect: +5-10pp
+  estimated_cost: 4 runs × 50 gen
+  source: literature
+  created: '2026-04-09'
+  builds_on: []
+  contradicts: []
+  alternative_to: []
+  notes: 'On hold: requires significant implementation work (new stage type). Pick
+    after simpler ideas are exhausted.
+
+    '
+  literature_refs:
+  - HotpotQA paper (Yang et al. 2018)
+- id: adversarial_001
+  title: Heilbronn baseline reproducibility (N=4 replication)
+  task: heilbron
+  status: done
+  rank: 0.95
+  hypothesis: 'The heilbron-prover baseline (mean actual_fitness 0.03464, N=2) may
+    not be reproducible. adversarial-dynamic-updates all-below-baseline result (even
+    control cells at 0.03020-0.03186) raises doubt about baseline stability.
+
+    '
+  mechanism: Exact replication of heilbron-prover setup with N=4
+  expected_effect: Mean within +/- 0.002 of 0.03464 (confirmation) or significantly
+    lower (revision)
+  estimated_cost: 4 replicates × gen 50 = 8 runs, ~48h
+  source: retrospective
+  created: '2026-04-10'
+  builds_on:
+  - adversarial/heilbron-prover
+  contradicts: []
+  alternative_to: []
+  notes: 'HIGHEST PRIORITY. All comparative claims in the adversarial research line
+    depend on this baseline. Must run before any further mechanism experiments.
+
+    '
+  literature_refs: []
+  started_experiment: heilbron/baseline-repro
+  result: SUGGESTIVE
+  result_experiment: heilbron/baseline-repro
+- id: adversarial_002
+  title: K=3 vs K=0 concurrent control (clean comparison)
+  task: heilbron
+  status: queued
+  rank: 0.48
+  hypothesis: 'K=3 bidirectional opponent feedback improves Constructor actual_fitness
+    beyond K=0. adversarial-v2 was suggestive (+0.00038) but confounded by historical
+    baseline, premature stop (45%), and steady-state engine.
+
+    '
+  mechanism: Concurrent K=3 vs K=0 arms with generational engine
+  expected_effect: K=3 > K=0 by 0.001-0.003 (based on adversarial-v2 signal)
+  estimated_cost: 2 arms × 2 replicates = 8 runs, gen 75, ~72h
+  source: retrospective
+  created: '2026-04-10'
+  builds_on:
+  - heilbron/adversarial-v2
+  contradicts: []
+  alternative_to: []
+  notes: 'Cleans up adversarial-v2 weaknesses. Removes 3 confounds: historical baseline,
+    premature stop, steady-state engine.
+
+    '
+  literature_refs: []
+- id: adversarial_003
+  title: Structured move Improver (reduce search space)
+  task: heilbron
+  status: queued
+  rank: 0.74
+  hypothesis: 'Improver stagnation (confirmed 6 experiments) is caused by overly large
+    search space. Full-function Improver (entrypoint -> improved_points) is too hard
+    to evolve near Constructor optima. Constraining to perturbation policy (select_point
+    + perturb) reduces search space while preserving adversarial dynamic.
+
+    '
+  mechanism: New structured-move Improver problem variant + validator
+  expected_effect: Improver acceptance rate >5% after gen 20 (breaking stagnation)
+  estimated_cost: 2 arms × 2 replicates = 8 runs + ~8h engineering
+  source: retrospective
+  created: '2026-04-10'
+  builds_on:
+  - adversarial/heilbron-prover
+  - heilbron/adversarial-v2
+  - heilbron/adversarial-dynamic-updates
+  contradicts: []
+  alternative_to:
+  - adversarial_009
+  notes: >
+    Priority depends on adversarial_009 outcome. If K=5 fails (stagnation persists),
+    this becomes top priority — stagnation is search space, not budget.
+  literature_refs: []
+- id: adversarial_004
+  title: Non-adversarial Heilbronn with dynamic topology
+  task: heilbron
+  status: queued
+  rank: 0.7
+  hypothesis: 'Dynamic topology (+8.5pp on HoVer) may improve Heilbronn MAP-Elites
+    without adversarial co-evolution. If non-adversarial MAP-Elites matches the adversarial
+    baseline (0.03464), the adversarial framework adds complexity without benefit.
+
+    '
+  mechanism: Standard MAP-Elites with Heilbronn-specific behavior characterization
+    (centroid, area variance, convex hull ratio)
+  expected_effect: Dynamic topology +0.002-0.005 actual_fitness over fixed
+  estimated_cost: 2 arms × 2 replicates = 4 runs, gen 75, ~24h
+  source: retrospective
+  created: '2026-04-10'
+  builds_on:
+  - hover/dynamic-topology
+  contradicts: []
+  alternative_to: []
+  notes: 'CRITICAL missing comparison: no experiment has tested adversarial vs non-adversarial
+    on Heilbronn. This fills that gap. Run in parallel with adversarial_001.
+
+    '
+  literature_refs:
+  - MAP-Elites (Mouret & Clune 2015)
+- id: adversarial_005
+  title: Soft fitness signal isolation (SOFT vs GAN, no re-eval)
+  task: heilbron
+  status: queued
+  rank: 0.50
+  hypothesis: 'Soft fitness (quality + resistance blend) outperforms pure GAN resistance.
+    adversarial-dynamic-updates showed SOFT_C 0.03186 vs GAN_C 0.02854, but confounded
+    by 2×2 design. Clean isolation needed.
+
+    '
+  mechanism: Binary vs soft fitness, no re-evaluation in either arm
+  expected_effect: Soft > GAN by 0.002+
+  estimated_cost: 2 arms × 2 replicates = 8 runs, ~48h
+  source: retrospective
+  created: '2026-04-10'
+  builds_on:
+  - heilbron/adversarial-dynamic-updates
+  contradicts: []
+  alternative_to: []
+  notes: 'CONDITIONAL: run only if adversarial_001 confirms baseline reproducibility.
+    Low priority — soft fitness advantage may be academic if non-adversarial approach
+    (adversarial_004) works well.
+
+    '
+  literature_refs: []
+- id: framework_001
+  title: 'Agent design evolution: evolve mutation prompts alongside chain programs'
+  task: any
+  status: queued
+  rank: 0.88
+  hypothesis: 'The mutation operator (LLM prompt + instructions) is fixed during evolution.
+    Evolving the mutation prompts in parallel with the chain programs (meta-evolution)
+    may discover better mutation strategies for specific tasks.
+
+    '
+  mechanism: Extend prompt_evolution pipeline to target mutation prompts, not chain
+    prompts
+  expected_effect: +5-15pp; high variance
+  estimated_cost: 4 runs × 60 gen + prompt evo setup
+  source: literature
+  created: '2026-04-09'
+  builds_on: []
+  contradicts:
+  - hotpotqa/prompt_coevolution
+  - hover/prompt_coevolution
+  alternative_to: []
+  notes: 'Prior prompt co-evolution results were NULL (mutation prompts). This is
+    different: evolve the MUTATION prompts (how to mutate), not the CHAIN prompts
+    (the chains themselves). Volkov will need to assess this distinction carefully.
+
+    '
+  literature_refs:
+  - ADAS (Liu et al. 2024) — agent design as searchable code space
+  - AlphaEvolve (DeepMind 2025) — evolve evolutionary operators
+- id: framework_002
+  title: 'Hypothesis-conditioned mutation: give mutator the current research hypothesis'
+  task: any
+  status: queued
+  rank: 0.73
+  hypothesis: 'Current mutation is goal-agnostic: it tries to improve fitness without
+    knowing WHY. Injecting the experiment hypothesis (e.g., "we are testing whether
+    3-hop retrieval is better than 2-hop") into the mutation prompt may produce more
+    hypothesis-directed mutations and faster convergence.
+
+    '
+  mechanism: New mutation context injection in experiment-specific mutation prompts
+  expected_effect: +2-5pp and faster convergence (fewer gens to plateau)
+  estimated_cost: 4 runs × 40 gen
+  source: literature
+  created: '2026-04-09'
+  builds_on: []
+  contradicts: []
+  alternative_to: []
+  notes: 'Low-risk: config + prompt file change only.'
+  literature_refs:
+  - AI Scientist v2 (Sakana AI 2025) — hypothesis-driven code generation
+  - R&D-Agent (Microsoft 2024) — goal-directed development
+- id: adversarial_006
+  title: Adversarial vs solo MAP-Elites on Heilbronn (clean comparison)
+  task: heilbron
+  status: done
+  rank: 0.93
+  hypothesis: 'The entire adversarial research line (5 experiments, 28 runs) assumes
+    adversarial co-evolution adds value over standard MAP-Elites. This has NEVER been
+    tested. If solo MAP-Elites reaches comparable actual_fitness (~0.034) without
+    any opponent, the adversarial overhead is unjustified. This is make-or-break for
+    the paper narrative.
+
+    '
+  mechanism: New solo Heilbronn problem variant (standard MAP-Elites, no opponent,
+    direct actual_fitness optimization). Compare against adversarial (heilbron-prover
+    config).
+  expected_effect: 'Determines paper framing: adversarial > solo = paper about adversarial
+    pressure; adversarial = solo = pivot to MAP-Elites paper'
+  estimated_cost: 2 arms × 4 replicates = 12 runs (4 solo + 8 adversarial), gen 50,
+    ~48h
+  source: retrospective
+  created: '2026-04-11'
+  builds_on:
+  - heilbron/baseline-repro
+  - adversarial/heilbron-prover
+  contradicts: []
+  alternative_to:
+  - adversarial_004
+  notes: 'HIGHEST PRIORITY from retrospective 2026-04-11. Different from adversarial_004
+    which mixes in dynamic topology — this is a clean adversarial vs solo comparison
+    with identical mutation LLM, generations, and cold start. adversarial_004 becomes
+    a follow-up if this shows solo is competitive.
+
+    '
+  literature_refs:
+  - MAP-Elites (Mouret & Clune 2015)
+  - FunSearch (Romera-Paredes et al. 2023) — solo MAP-Elites + LLM
+  started_experiment: adversarial/adversarial-vs-solo
+  result: INCONCLUSIVE
+  result_experiment: adversarial/adversarial-vs-solo
+- id: adversarial_009
+  title: "WGAN-GP iteration ratio: K Improver generations per Constructor generation"
+  task: heilbron
+  status: done
+  rank: 0.95
+  hypothesis: >
+    Improver stagnation (confirmed 6 experiments) is caused by insufficient
+    computational budget: 8 mutations per generation is too few to find improvements
+    on near-optimal Constructor solutions. Increasing Improver mutations to K*8 per
+    generation (WGAN-GP analog) gives the Improver K× more exploration budget
+    while the Constructor is frozen — exactly matching the GAN training insight
+    that D needs more iterations than G. All prior interventions changed information,
+    none changed compute budget — this is the first to target budget asymmetry.
+  mechanism: >
+    Config-only change: set max_mutations_per_generation=K*8 for Improver runs.
+    MainRunSyncHook naturally blocks Constructor while Improver churns.
+    Zero code changes required.
+  expected_effect: "Improver acceptance rate >5% after gen 20. Constructor actual_fitness >= baseline (0.03464)."
+  estimated_cost: "2 arms × 3 pairs = 12 runs, gen 50, ~72h"
+  source: "human (WGAN-GP analogy)"
+  created: "2026-04-12"
+  builds_on:
+  - adversarial/heilbron-prover
+  - heilbron/baseline-repro
+  - adversarial/adversarial-vs-solo
+  contradicts: []
+  alternative_to:
+  - adversarial_003
+  notes: >
+    PARTIALLY TESTED. heilbron/asymmetric-iterations redesigned the mechanism
+    (source code access + feedback modes) but K=5 was amended to K=1. Compute
+    budget was NOT tested. Both arms produced >=105% SOTA (0.03648, 0.03650) but
+    stagnation persisted. Information-architecture changes help Constructor but
+    do not break Improver stagnation. The budget hypothesis remains open.
+  literature_refs:
+  - "WGAN-GP (Gulrajani et al. 2017) — n_critic=5 standard"
+  - "Competitive coevolution (Ficici & Pollack 2003) — asymmetric evaluation budget"
+  started_experiment: "heilbron/asymmetric-iterations"
+  result: "PARTIAL — K=5 NOT tested (K=1 amendment). Both arms >=105% SOTA. Stagnation persists."
+  result_experiment: "heilbron/asymmetric-iterations"
+- id: adversarial_010
+  title: "K=5 compute budget isolation (clean WGAN-GP test)"
+  task: heilbron
+  status: queued
+  rank: 0.50
+  hypothesis: >
+    Improver stagnation (confirmed 7 experiments) is caused by insufficient
+    compute budget. All 7 prior experiments changed information flow; none changed
+    compute budget. K=5 was designed but amended to K=1 in asymmetric-iterations.
+    The simplest possible test: set Improver max_mutations_per_generation=40 (5x8)
+    in standard adversarial_coevo pipeline. No source code access, no composition,
+    no gradient-in-prompt — isolate the budget variable.
+  mechanism: >
+    Config-only: Improver max_mutations_per_generation=40 vs 8 (control).
+    Standard adversarial_coevo pipeline. ProgressBasedSyncHook with
+    min_delta=${max_mutations_per_generation} ensures epoch-level sync.
+  expected_effect: "Improver acceptance rate >5% after gen 20 in budget arm. Constructor actual_fitness >= 0.03449."
+  estimated_cost: "2 arms x 4 pairs = 16 runs, gen 50, ~48h"
+  source: "retrospective (2026-04-14)"
+  created: "2026-04-14"
+  builds_on:
+  - heilbron/asymmetric-iterations
+  - heilbron/baseline-repro
+  contradicts: []
+  alternative_to:
+  - adversarial_003
+  notes: >
+    DOWNRANKED 0.88 -> 0.50 by 2026-04-19 retrospective. Superseded by
+    adversarial_016 (K=3 vs K=5 re-test under REDESIGN bundle). k5-budget-v3
+    provided a confounded K-comparison; interpretable answer requires
+    adversarial_015 (REDESIGN bundle) to land first. This idea remains as a
+    tight-coupling variant only if 016 shows K=5 > K=3 AND coupling
+    (adversarial_014) shows min_delta=1 is optimal -- then 010 isolates
+    whether K alone works under TIGHT coupling.
+  literature_refs:
+  - "WGAN-GP (Gulrajani et al. 2017) — n_critic=5"
+  - "Competitive coevolution (Ficici & Pollack 2003)"
+- id: adversarial_011
+  title: "Source code access isolation (white-box vs output-only)"
+  task: heilbron
+  status: queued
+  rank: 0.45
+  hypothesis: >
+    asymmetric-iterations showed >=105% SOTA by gen 8-12 vs gen 30-40 for
+    baseline. But source code access was confounded with persistent D archive,
+    inner iterations, and feedback mechanisms. Isolating source code ON/OFF
+    determines whether white-box access is the active ingredient or whether
+    simpler changes (more iterations, different pipeline) drove the acceleration.
+  mechanism: >
+    2-arm: (A) Standard adversarial with D seeing G source code via
+    OpponentFeedbackStage, (B) Standard adversarial with D seeing only G
+    outputs (current K=0 baseline). Same pipeline otherwise.
+  expected_effect: "Source code arm reaches 0.034 by gen 15 (vs gen 30-40 for output-only). Time-to-threshold halved."
+  estimated_cost: "2 arms x 4 pairs = 16 runs, gen 50, ~48h"
+  source: "retrospective (2026-04-14)"
+  created: "2026-04-14"
+  builds_on:
+  - heilbron/asymmetric-iterations
+  contradicts: []
+  alternative_to: []
+  notes: >
+    DOWNGRADED from HIGH to MEDIUM by 2026-04-16 retrospective.
+    asymmetric-iterations-v2 did NOT reproduce the early acceleration despite
+    identical source code access — the difference was coupling granularity
+    (min_delta=1 in v1 vs min_delta=8 in v2). Source code access may be
+    necessary but not sufficient; coupling is confounded. Consider 2x2
+    factorial (source x coupling) instead of simple ON/OFF.
+  literature_refs:
+  - "TextGrad (Yuksekgonul et al. 2024)"
+- id: adversarial_012
+  title: "Adversarial vs solo power increase (N=8/arm)"
+  task: heilbron
+  status: queued
+  rank: 0.63
+  hypothesis: >
+    adversarial-vs-solo (d=0.70, p=0.365) was underpowered at N=4 (55% power).
+    Adding 4 solo runs to existing data gives N=8/arm and >80% power for
+    MDE=0.003. If d=0.70 holds, p<0.05. Cheapest possible experiment to
+    resolve a paper-critical claim.
+  mechanism: "4 additional solo runs (heilbron_solo problem, gen 50). Reuse existing N=4 adversarial + N=4 solo."
+  expected_effect: "p < 0.05 if true effect is d=0.70. Resolves INCONCLUSIVE verdict."
+  estimated_cost: "4 solo runs only, gen 50, ~24h"
+  source: "retrospective (2026-04-14)"
+  created: "2026-04-14"
+  builds_on:
+  - adversarial/adversarial-vs-solo
+  - heilbron/baseline-repro
+  contradicts: []
+  alternative_to: []
+  notes: >
+    DOWNRANKED 0.84 -> 0.63 by 2026-04-19 retrospective. Paper-critical but
+    existing N=4 adversarial data ran under the broken D hard-floor fitness.
+    Adding 4 solo runs without re-running the adversarial arm under REDESIGN
+    bundle compares solo-on-current-fitness to adversarial-on-broken-fitness
+    -- an unsound comparison. Either: (a) wait for adversarial_015 to land
+    and compare post-REDESIGN adversarial N=4 + solo N=4, or (b) run N=8 solo
+    now to characterize solo baseline, then pair against post-REDESIGN
+    adversarial data. Option (b) is cheap and still informative.
+  literature_refs: []
+- id: adversarial_007
+  title: Warm-start variance reduction for Heilbronn experiments
+  task: heilbron
+  status: queued
+  rank: 0.58
+  hypothesis: 'Inter-pair variance (SD=0.0026, 18% of mean) from baseline-repro makes
+    0.002 effect sizes undetectable at N=4. Using a warm-start seed (best program
+    from heilbron-prover, actual_fitness=0.03548) instead of cold start should reduce
+    variance by anchoring all pairs near a known good region, halving the N required
+    for future mechanism experiments.
+
+    '
+  mechanism: Extract best Constructor program from heilbron-prover archives. Use as
+    initial_programs/baseline.py seed for all runs.
+  expected_effect: SD reduction from 0.0026 to ~0.0013 (50% variance reduction)
+  estimated_cost: 4 runs × gen 50, ~24h
+  source: retrospective
+  created: '2026-04-11'
+  builds_on:
+  - heilbron/baseline-repro
+  contradicts: []
+  alternative_to: []
+  notes: 'Meta-investment in statistical power. Run after adversarial_006 resolves
+    the adversarial-vs-solo question. Only valuable if more mechanism experiments
+    are planned.
+
+    '
+  literature_refs: []
+- id: adversarial_008
+  title: Extended adversarial runs (gen 150) to test Q_MAX ceiling
+  task: heilbron
+  status: queued
+  rank: 0.60
+  hypothesis: 'P3_A from baseline-repro reached Q_MAX (0.0365) at gen 50 and was still
+    trending up. Extending to gen 150 tests whether adversarial co-evolution can push
+    past the theoretical near-optimum, which would be a significant computational
+    result for the Heilbronn triangle problem itself.
+
+    '
+  mechanism: Exact heilbron-prover config with max_generations=150
+  expected_effect: '>50% of pairs exceed Q_MAX (0.0365). Ceiling discovery.'
+  estimated_cost: 2 pairs × gen 150, ~72h
+  source: retrospective
+  created: '2026-04-11'
+  builds_on:
+  - heilbron/baseline-repro
+  - adversarial/heilbron-prover
+  contradicts: []
+  alternative_to: []
+  notes: 'Scientifically interesting for Heilbronn itself but marginal for the adversarial
+    co-evolution paper unless combined with adversarial_006 showing adversarial >
+    solo.
+
+    '
+  literature_refs: []
+- id: adversarial_013
+  title: "K=5 compute budget + loose coupling (combined best-bet)"
+  task: heilbron
+  status: queued
+  rank: 0.58
+  started_experiment: "heilbron/k5-budget-loose (INVALID); superseded by k5-budget-v3 (INCONCLUSIVE, confounded)"
+  hypothesis: >
+    Improver stagnation (confirmed 8 experiments) is caused by insufficient
+    compute budget. v1's accidental loose coupling (min_delta=1) gave D many
+    micro-steps per G epoch — an implicit compute asymmetry — and produced
+    the best-ever results (>=105% SOTA). v2's tight coupling (min_delta=8)
+    removed this implicit asymmetry and underperformed despite 4-6x more
+    generations. Combining EXPLICIT budget asymmetry (K=5,
+    max_mutations_per_generation=40 for D) with loose coupling (min_delta=1)
+    gives both the explicit compute advantage AND the timing flexibility that
+    produced v1's peaks. This is the highest-information single experiment
+    available: it tests the only untested intervention class (compute budget)
+    under the coupling regime that produced the best prior results.
+  mechanism: >
+    Config-only: Improver max_mutations_per_generation=40, Constructor=8.
+    ProgressBasedSyncHook with min_delta=1 (loose coupling). Standard
+    adversarial_coevo pipeline. No source code access, no composition,
+    no gradient-in-prompt — isolate budget + coupling from information flow.
+  expected_effect: "Improver acceptance rate >5% after gen 20. Constructor actual_fitness >= 0.03449. Best pair >= 0.03650 (v1 peak)."
+  estimated_cost: "2 arms x 4 pairs = 16 runs, gen 50, ~48h"
+  source: "retrospective (2026-04-16)"
+  created: "2026-04-16"
+  builds_on:
+  - heilbron/asymmetric-iterations
+  - heilbron/asymmetric-iterations-v2
+  - heilbron/baseline-repro
+  contradicts: []
+  alternative_to:
+  - adversarial_010
+  notes: >
+    BLOCKED-ON-REDESIGN (2026-04-19 retrospective). Originally started as
+    k5-budget-loose (PR #207, INVALID — structural D hard-floor fitness
+    flaw discovered 2026-04-16). k5-budget-v3 ran a K=3 vs K=5 comparison
+    under 2D MAP-Elites and delivered INCONCLUSIVE (effect -0.00164, 95%
+    CI [-0.00393, +0.00065]) due to (a) K3_1 ProgressBasedSyncHook
+    deadlock at gen 29/50, (b) N=2 underpower, (c) ran on the broken
+    fitness landscape described in heilbron_d_fitness_flaw. Cannot be
+    interpreted as NULL — it is confounded-tested. Re-test is queued as
+    adversarial_016, contingent on REDESIGN bundle (adversarial_015)
+    restoring a valid fitness signal, plus KF-07 deadlock guard and
+    N=4/arm.
+  literature_refs:
+  - "WGAN-GP (Gulrajani et al. 2017) — n_critic=5 standard"
+  - "Competitive coevolution (Ficici & Pollack 2003) — asymmetric budget"
+- id: adversarial_014
+  title: "Coupling granularity dose-response (min_delta as IV)"
+  task: heilbron
+  status: queued
+  rank: 0.78
+  hypothesis: >
+    asymmetric-iterations v1 (min_delta=1, loose) produced >=105% SOTA
+    (0.03648, 0.03650) while v2 (min_delta=8, tight) produced only 98-104%
+    baseline (best 0.03588) despite 4-6x more Constructor generations. The
+    v1/v2 comparison is confounded by 6 bug fixes. A clean dose-response
+    test (min_delta=1 vs 4 vs 8) with identical pipeline determines whether
+    coupling granularity is causally important. Loose coupling allows D to
+    run many micro-steps per G epoch, creating implicit compute budget
+    asymmetry — so this also tests whether implicit asymmetry (loose
+    coupling) is as effective as explicit asymmetry (K=5 budget).
+  mechanism: >
+    Config-only: 3-arm (min_delta=1 vs 4 vs 8), same
+    max_mutations_per_generation=8 for both populations. Standard
+    adversarial_coevo pipeline (K=0, no source code access). Gen 50.
+  expected_effect: "min_delta=1 > 4 > 8 on Constructor actual_fitness. Time-to-threshold (gen at which actual_fitness first exceeds 0.030) halved for loose coupling."
+  estimated_cost: "3 arms x 3 pairs = 18 runs, gen 50, ~54h"
+  source: "retrospective (2026-04-16)"
+  created: "2026-04-16"
+  builds_on:
+  - heilbron/asymmetric-iterations
+  - heilbron/asymmetric-iterations-v2
+  contradicts: []
+  alternative_to: []
+  notes: >
+    CONTINGENT-ON-REDESIGN (updated 2026-04-19). Contingency shifted from
+    adversarial_013 to adversarial_015 (REDESIGN bundle). Rationale: both
+    v1 and v2 ran under the broken D hard-floor fitness function; coupling
+    granularity cannot be isolated until smoothed fitness gives D a real
+    gradient to respond to micro-step timing. Run ONLY after adversarial_015
+    shows D collapse is eliminated. N=3/arm is borderline for power but the
+    dose-response shape (monotonic vs non-monotonic) is informative even at
+    low N.
+  literature_refs:
+  - "WGAN-GP (Gulrajani et al. 2017) — training dynamics depend on D:G ratio"
+- id: adversarial_015
+  title: "REDESIGN bundle: smoothed tanh fitness + deterministic HoF + K=L=3"
+  task: heilbron
+  status: queued
+  rank: 0.97
+  hypothesis: >
+    Improver stagnation across 10 heilbron experiments has a single root
+    cause (confirmed 2026-04-16): the D fitness formula
+    `min(max(delta, 0.0) / Q_MAX, 1.0)` (pop_b/evaluate.py:78) clamps every
+    non-winning comparison to exactly 0.0, producing a 60-90% point mass
+    empirical across k5-budget-loose D populations. G's mirror formula
+    `float(delta <= 0)` (pop_a/evaluate.py:95) is binary per opponent,
+    masked by the 50% intrinsic-quality term. All prior information-flow,
+    coupling, and compute-budget interventions ran on top of this broken
+    fitness landscape — their NULL results are expected, not diagnostic.
+    The REDESIGN bundle (smoothed tanh fitness for both populations,
+    deterministic top-K HoF, K=L=3, archive_reeval=true, cache_on edges)
+    targets the actual bottleneck. If positive, the entire intervention
+    space reopens for valid re-testing. If negative, we have a
+    fundamental ceiling, not a signal problem.
+  mechanism: >
+    Code + config: ~40-70 LOC from experiments/heilbron/k5-budget-loose/REDESIGN.md.
+    (1) pop_b/evaluate.py:78 — replace hard-floor with `(tanh(delta/Q_MAX) + 1) / 2`.
+    (2) pop_a/evaluate.py:95 — replace binary resistance with smoothed per-opponent score
+    then average. (3) Deterministic `get_top_k` HoF selector replacing stochastic softmax.
+    (4) Config: K=L=3, archive_reeval=true, cache_on edges via CacheOnlyInput model.
+    (5) 2x2 factorial (fitness × feedback) to include known-NULL feedback axis as
+    internal-consistency calibration.
+  expected_effect: >
+    D fitness distribution at gen 25 has NO 0.0 point mass (empirical: each D
+    population shows CV > 0.10 across niches). G mean actual_fitness at gen 50
+    >= 0.03449 (v2 baseline parity). Stretch: best pair >= 0.03650 (v1 peak).
+  estimated_cost: "4 arms × 2 pairs = 8 runs, gen 50, ~24h wall-clock"
+  source: "retrospective (2026-04-19)"
+  created: "2026-04-19"
+  builds_on:
+  - heilbron/k5-budget-loose
+  - heilbron/k5-budget-v3
+  contradicts:
+  - heilbron/adversarial-dynamic-updates  # re-tests archive_reeval under smoothed fitness
+  alternative_to:
+  - adversarial_013  # K=5 budget cannot be interpreted until fitness is fixed
+  notes: >
+    BLOCKING PRIORITY. All other heilbron ideas (adversarial_010, 012, 013,
+    014, 016, 017) are contingent on this. Pre-registered success: smoothed
+    arms lose the D 0.0 point mass AND G >= baseline parity. Pre-registered
+    failure: smoothed arms still show D collapse OR G < 95% baseline (then
+    escalate to adversarial_018 Pareto). Prerequisites: KF-07 deadlock
+    guard, KF-08 archive pipeline extra=ignore, KF-09 gen-0 persistence gap,
+    pre-registered max_runtime_hours cap. Ensure diagnose.py treatment
+    verification catches the case where RedesignFitnessCalculator never
+    instantiates (silent fallback class).
+  literature_refs:
+  - "WGAN-GP (Gulrajani et al. 2017) — continuous critic output avoids gradient collapse"
+  - "Competitive coevolution (Ficici & Pollack 2003) — engagement-preserving objectives"
+  - "Pareto coevolution (de Jong 2005) — smoothed dominance as selection signal"
+- id: adversarial_016
+  title: "K=3 vs K=5 compute-budget re-test under REDESIGN bundle"
+  task: heilbron
+  status: queued
+  rank: 0.72
+  hypothesis: >
+    k5-budget-v3 delivered INCONCLUSIVE on K=3 vs K=5 (effect -0.00164,
+    95% CI [-0.00393, +0.00065]) because of three independent confounds:
+    (a) K3_1 ProgressBasedSyncHook deadlock at gen 29/50 (6-hour hang),
+    (b) N=2 underpower, (c) both arms ran on the broken D hard-floor
+    fitness formula. Re-running with N=4/arm, KF-07 deadlock timeout
+    fallback, and the REDESIGN bundle applied to both arms produces the
+    first interpretable K=5 test. If K=5 > K=3 under a valid fitness
+    signal, the compute-budget hypothesis from WGAN-GP (n_critic=5) is
+    vindicated for LLM-guided evolution.
+  mechanism: >
+    Config-only on top of adversarial_015 config: 2-arm (K=3 vs K=5),
+    N=4/arm. max_mutations_per_generation scaled accordingly. Deterministic
+    HoF, smoothed fitness, 2D MAP-Elites (fitness, wins) BD — all inherited
+    from 015. Sole IV is HoF size K.
+  expected_effect: >
+    K=5 arm mean actual_fitness - K=3 arm mean >= +0.002 (2sigma at N=4 based
+    on v3 SD). Time-to-threshold (gen at which fitness first >= 0.032) shorter
+    for K=5.
+  estimated_cost: "2 arms × 4 pairs = 16 runs, gen 50, ~48h wall-clock"
+  source: "retrospective (2026-04-19)"
+  created: "2026-04-19"
+  builds_on:
+  - heilbron/k5-budget-v3  # supersedes the inconclusive N=2 test
+  - adversarial_015        # requires working fitness signal
+  contradicts: []
+  alternative_to:
+  - adversarial_010
+  - adversarial_013
+  notes: >
+    CONTINGENT-ON-REDESIGN: launch only after adversarial_015 demonstrates
+    that D collapse is eliminated and G achieves baseline parity. Otherwise
+    inherits the same broken-fitness confound that invalidated v3.
+    KF-07 deadlock guard is a hard prerequisite — without timeout fallback,
+    the K=3 arm is likely to deadlock again. Pre-registered wall-clock
+    cap of max_runtime_hours per pair. N=4 lifts statistical power from
+    v3's 45% to >=80% at the +0.002 effect.
+  literature_refs:
+  - "WGAN-GP (Gulrajani et al. 2017) — n_critic=5 standard"
+  - "Goodfellow et al. (2014) — discriminator inner-loop ratio"
+- id: adversarial_017
+  title: "BD dimensionality ablation (1D vs 2D) under REDESIGN bundle"
+  task: heilbron
+  status: queued
+  rank: 0.60
+  hypothesis: >
+    k5-budget-v3 demonstrated 2D MAP-Elites BD (fitness, wins) eliminates
+    D collapse — all 4 D populations maintained fitness in [0.52, 0.68]
+    vs prior 1D runs showing 60-90% point mass at 0.0. But 2D was coupled
+    with the broken fitness formula, so we cannot distinguish: (a) 2D BD
+    structurally prevents collapse via niche separation, (b) smoothed
+    fitness alone prevents collapse and 2D BD is redundant, (c) both
+    contribute. Ablating 1D vs 2D under the REDESIGN bundle (smoothed
+    fitness) isolates the BD contribution. Paper-relevant: justifies
+    whether the 2D BD is a necessary architectural choice or surplus.
+  mechanism: >
+    Config-only on top of adversarial_015: 2-arm (1D fitness-only BD vs
+    2D (fitness, wins) BD). All other factors identical to REDESIGN.
+    N=3/arm.
+  expected_effect: >
+    If (a): 1D still collapses despite smoothed fitness -> 2D BD confirmed
+    structural. If (b): 1D under smoothed fitness matches 2D -> 2D is
+    redundant architecture. If (c): 1D collapses less but slower
+    convergence than 2D.
+  estimated_cost: "2 arms × 3 pairs = 12 runs, gen 50, ~36h wall-clock"
+  source: "retrospective (2026-04-19)"
+  created: "2026-04-19"
+  builds_on:
+  - heilbron/k5-budget-v3
+  - adversarial_015
+  contradicts: []
+  alternative_to: []
+  notes: >
+    CONTINGENT-ON-REDESIGN. Lower priority than K=5 re-test because
+    (a) 2D BD has already demonstrated value structurally, (b) paper's
+    architectural claims are robust either way. Useful for the ablation
+    section of the eventual paper. Could be combined with 016 into a 2x2
+    (K × BD dim) factorial to save compute if 015 is strongly positive.
+  literature_refs:
+  - "MAP-Elites (Mouret & Clune 2015) — BD design affects illumination"
+  - "Cully & Demiris (2018) — BD dimensionality vs performance"
+- id: adversarial_018
+  title: "Pareto coevolution (DECA/IPCA) escalation"
+  task: heilbron
+  status: queued
+  rank: 0.42
+  hypothesis: >
+    If adversarial_015 (REDESIGN bundle) fails to break D collapse or
+    lift G actual_fitness, the ceiling is not in the fitness smoothness
+    but in the scalar-fitness assumption itself. DECA (de Jong 2005) and
+    IPCA (de Jong & Pollack 2004) replace scalar fitness with Pareto
+    fronts over opponents, preventing cycling and engagement loss that
+    single-objective coevolution cannot escape. This is the recognized
+    escalation path flagged in experiments/heilbron/k5-budget-loose/REDESIGN.md.
+  mechanism: >
+    New Python (~200-400 LOC): Pareto-archive selection, DECA-style
+    distinction-based scoring, IPCA-style informativeness test. Replaces
+    scalar fitness HoF selection with Pareto-non-dominated set. New
+    module gigaevo/adversarial/pareto.py and config hooks.
+  expected_effect: >
+    G mean actual_fitness >= 0.03449 baseline parity AND D collapse
+    eliminated WITHOUT fitness smoothing. Or: engagement metric (D
+    strategy-rejection rate across generations) stays > 20% where
+    scalar REDESIGN drifts toward 0.
+  estimated_cost: "Engineering: 2-4 weeks. Runs: 4 arms × 2 pairs = 8 runs × gen 50, ~24h."
+  source: "retrospective (2026-04-19)"
+  created: "2026-04-19"
+  builds_on:
+  - adversarial_015  # only if 015 NULL
+  contradicts: []
+  alternative_to:
+  - adversarial_015
+  notes: >
+    CONTINGENT-ON-NULL-REDESIGN: launch ONLY if adversarial_015 pre-registered
+    failure criteria trigger (smoothed arms still collapse OR G < 95%
+    baseline). Otherwise over-engineered. High engineering cost (new
+    selection infrastructure) justifies the strict gating. Volkov concern:
+    Pareto selection interacts with MAP-Elites in non-trivial ways — prior
+    art is on standard GAs, not MAP-Elites coevolution.
+  literature_refs:
+  - "DECA (de Jong 2005) — distinction-based Pareto coevolution"
+  - "IPCA (de Jong & Pollack 2004) — informativeness Pareto archive"
+  - "Ficici & Pollack (2003) — Pareto coevolution theory"
+- id: heilbron-g-side-lineage-filter
+  task: heilbron
+  status: proposed
+  source: docs/superpowers/specs/2026-04-21-shared-benchmark-filtered-lineage-design.md
+  rationale: |
+    G-side LineageStage currently feeds parent-G → child-G transitions to
+    the LLM without filtering on shared D opponents. G's quality-half
+    (min_area / 0.0365) is HoF-invariant by construction, so the payoff
+    of filtering on tracker.faced_by_g is smaller than the D-side case.
+    Revisit if an ablation shows the resistance half is driving
+    decisions. Implementation would subclass LineageStage analogously to
+    SharedBenchmarkFilteredLineageStage but read tracker.faced_by_g /
+    metrics_by_g instead.

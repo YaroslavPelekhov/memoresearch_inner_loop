@@ -1,0 +1,3 @@
+_target_: gigaevo.evolution.engine.stopper.TargetFitnessStopper
+target_fitness: ${target_fitness}
+

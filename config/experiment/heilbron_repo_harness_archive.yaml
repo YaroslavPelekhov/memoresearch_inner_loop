@@ -1,0 +1,46 @@
+# @package _global_
+
+defaults:
+  - repo_harness_archive
+  - override /post_step_hook: repo_viz
+  - _self_
+
+problem:
+  name: heilbron
+
+repo_harness:
+  auto_seed:
+    enabled: true
+    variants:
+      - grid
+      - random_arr
+      - cluster
+      - fan
+      - arc
+  mutation_backend:
+    _target_: gigaevo.repo_harness.backends.CommandCodingAgentBackend
+    name: codex
+    command:
+      - codex
+      - exec
+      - --ephemeral
+      - --full-auto
+      - --sandbox
+      - workspace-write
+      - --skip-git-repo-check
+      - --cd
+      - "{worktree}"
+      - "{prompt}"
+  entrypoint: solution.py
+  benchmark_command:
+    - ${oc.env:CONDA_PREFIX,/home/petranokhin/anaconda3/envs/agent_evo}/bin/python
+    - ${problem.dir}/repo_benchmark.py
+    - --candidate-repo
+    - "{worktree}"
+  benchmark_timeout: 300
+  structured_feedback_path: feedback.json
+  staged_validation:
+    enabled: false
+
+target_fitness: 0.0365
+max_generations: 50

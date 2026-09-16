@@ -1,0 +1,626 @@
+"""Tests for tools.experiment.manifest — schema validation, state machine, locking."""
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+import yaml
+
+from gigaevo.experiment.manifest import (
+    VALID_TRANSITIONS,
+    Status,
+    _validate,
+    claim_dbs,
+    generate_pr_description,
+    load_manifest,
+    recover_status,
+    refresh_db_claims,
+    release_db_claims,
+    set_status,
+    update_manifest,
+    write_manifest_atomic,
+)
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+def _minimal_raw(status: str = "preregistered") -> dict:
+    """Return a minimal valid experiment.yaml dict in nested (v2) shape."""
+    return {
+        "schema_version": 2,
+        "contract": {
+            "identity": {
+                "name": "test/smoke",
+                "task": "test",
+                "branch": "exp/smoke",
+            },
+            "max_generations": 10,
+            "problem": {
+                "has_test_set": False,
+                "fitness_type": "continuous",
+                "metric_name": "score",
+            },
+            "runs": [],
+            "servers": [],
+            "config": {},
+        },
+        "lifecycle": {
+            "status": status,
+            "smoke_test": {"completed": False},
+        },
+    }
+
+
+def _implemented_raw() -> dict:
+    """Return a valid implemented experiment.yaml dict in nested shape."""
+    raw = _minimal_raw(status="implemented")
+    raw["contract"]["runs"] = [
+        {
+            "label": "A1",
+            "db": 99,
+            "prefix": "chains/test/smoke",
+            "pipeline": "standard",
+            "problem_name": "chains/test/smoke",
+            "condition": "control",
+            "chain_url": "http://10.0.0.1:8001/v1",
+            "mutation_url": "http://10.0.0.1:8777/v1",
+            "model_name": "test-model",
+        }
+    ]
+    raw["contract"]["servers"] = ["10.0.0.1"]
+    raw["contract"]["config"] = {"stage_timeout": 300}
+    raw["lifecycle"]["smoke_test"] = {"completed": True, "db": 98, "generations": 3}
+    return raw
+
+
+def _running_raw() -> dict:
+    """Return a valid running experiment.yaml dict in nested shape."""
+    raw = _implemented_raw()
+    raw["lifecycle"]["status"] = "running"
+    raw["contract"]["runs"][0]["pid"] = 12345
+    raw["lifecycle"]["launch"] = {
+        "time": "2026-01-01T00:00:00Z",
+        "commit": "abc123",
+        "watchdog_pid": 12346,
+        "confirmed_at": "2026-01-01T00:01:00Z",
+    }
+    return raw
+
+
+@pytest.fixture
+def tmp_experiment(tmp_path: Path) -> tuple[str, Path]:
+    """Create a temporary experiment directory with a valid manifest."""
+    exp_dir = tmp_path / "experiments" / "test" / "smoke"
+    exp_dir.mkdir(parents=True)
+    yaml_path = exp_dir / "experiment.yaml"
+
+    raw = _minimal_raw()
+    with open(yaml_path, "w") as f:
+        yaml.safe_dump(raw, f, sort_keys=False)
+
+    return "test/smoke", tmp_path
+
+
+# ---------------------------------------------------------------------------
+# Schema validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidation:
+    def test_minimal_preregistered(self):
+        raw = _minimal_raw()
+        m = _validate(raw, "test/smoke")
+        assert m.lifecycle.status == "preregistered"
+        assert m.contract.identity.name == "test/smoke"
+        assert m.contract.identity.task == "test"
+
+    def test_invalid_status_rejected(self):
+        raw = _minimal_raw()
+        raw["lifecycle"]["status"] = "bogus"
+        with pytest.raises(ValueError, match="Invalid"):
+            _validate(raw, "test/smoke")
+
+    def test_unsupported_schema_version(self):
+        raw = _minimal_raw()
+        raw["schema_version"] = 99
+        with pytest.raises(ValueError, match="Unsupported schema_version"):
+            _validate(raw, "test/smoke")
+
+    def test_implemented_requires_runs(self):
+        raw = _minimal_raw(status="implemented")
+        raw["lifecycle"]["smoke_test"] = {"completed": True}
+        # No runs
+        with pytest.raises(ValueError, match="runs.*must be non-empty"):
+            _validate(raw, "test/smoke")
+
+    def test_implemented_requires_smoke_test(self):
+        raw = _implemented_raw()
+        raw["lifecycle"]["smoke_test"] = {"completed": False}
+        with pytest.raises(ValueError, match="smoke_test.completed"):
+            _validate(raw, "test/smoke")
+
+    def test_running_requires_pids(self):
+        raw = _running_raw()
+        raw["contract"]["runs"][0]["pid"] = None
+        with pytest.raises(ValueError, match="pid is required"):
+            _validate(raw, "test/smoke")
+
+    def test_running_requires_launch_time(self):
+        raw = _running_raw()
+        raw["lifecycle"]["launch"]["time"] = None
+        with pytest.raises(ValueError, match="launch.time is required"):
+            _validate(raw, "test/smoke")
+
+    def test_valid_implemented(self):
+        raw = _implemented_raw()
+        m = _validate(raw, "test/smoke")
+        assert m.lifecycle.status == "implemented"
+        assert len(m.contract.runs) == 1
+        assert m.contract.runs[0].label == "A1"
+
+    def test_valid_running(self):
+        raw = _running_raw()
+        m = _validate(raw, "test/smoke")
+        assert m.lifecycle.status == "running"
+        assert m.contract.runs[0].pid == 12345
+        assert m.lifecycle.launch.time == "2026-01-01T00:00:00Z"
+
+    def test_problem_has_test_set_false(self):
+        raw = _minimal_raw()
+        raw["contract"]["problem"]["has_test_set"] = False
+        m = _validate(raw, "test/smoke")
+        assert not m.contract.problem.has_test_set
+
+    def test_run_spec_fields(self):
+        raw = _implemented_raw()
+        m = _validate(raw, "test/smoke")
+        run = m.contract.runs[0]
+        assert run.db == 99
+        assert run.pipeline == "standard"
+
+    def test_custom_env_parsed(self):
+        raw = _implemented_raw()
+        raw["contract"]["custom_env"] = {"MY_VAR": "hello"}
+        m = _validate(raw, "test/smoke")
+        assert m.contract.custom_env == {"MY_VAR": "hello"}
+
+
+# ---------------------------------------------------------------------------
+# Config-Override Integrity Pipeline (Phase 1) — task_group, pinned, fingerprint
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrityPipelineSchema:
+    """Schema extensions for the Config-Override Integrity Pipeline.
+
+    See .claude/plans/humble-weaving-shamir.md Phase 1.
+    """
+
+    def test_config_task_group_default_none(self):
+        raw = _minimal_raw()
+        m = _validate(raw, "test/smoke")
+        assert m.contract.config.task_group is None
+
+    def test_config_task_group_parsed(self):
+        raw = _minimal_raw()
+        raw["contract"]["config"]["task_group"] = "heilbron"
+        m = _validate(raw, "test/smoke")
+        assert m.contract.config.task_group == "heilbron"
+
+    def test_config_pinned_default_empty(self):
+        raw = _minimal_raw()
+        m = _validate(raw, "test/smoke")
+        assert m.contract.config.pinned == {}
+
+    def test_config_pinned_parsed(self):
+        raw = _minimal_raw()
+        raw["contract"]["config"]["pinned"] = {
+            "n_opponents": 3,
+            "source_prompt_k": 3,
+            "num_parents": 1,
+        }
+        m = _validate(raw, "test/smoke")
+        assert m.contract.config.pinned["n_opponents"] == 3
+        assert m.contract.config.pinned["source_prompt_k"] == 3
+        assert m.contract.config.pinned["num_parents"] == 1
+
+    def test_config_pinned_rejects_shell_metachars(self):
+        raw = _minimal_raw()
+        raw["contract"]["config"]["pinned"] = {"evil;rm": 1}
+        with pytest.raises(ValueError, match="pinned.*shell|metachar|invalid"):
+            _validate(raw, "test/smoke")
+
+    def test_config_pinned_rejects_override_syntax(self):
+        raw = _minimal_raw()
+        raw["contract"]["config"]["pinned"] = {"k=v": 1}
+        with pytest.raises(ValueError, match="pinned.*override|invalid|="):
+            _validate(raw, "test/smoke")
+
+    def test_config_pinned_rejects_newline(self):
+        raw = _minimal_raw()
+        raw["contract"]["config"]["pinned"] = {"a\nb": 1}
+        with pytest.raises(ValueError, match="pinned.*newline|invalid"):
+            _validate(raw, "test/smoke")
+
+    def test_config_pinned_rejects_plus_prefix_override(self):
+        raw = _minimal_raw()
+        raw["contract"]["config"]["pinned"] = {"+extra.key": 1}
+        with pytest.raises(ValueError, match="pinned.*override|invalid|\\+"):
+            _validate(raw, "test/smoke")
+
+    def test_run_pinned_default_empty(self):
+        raw = _implemented_raw()
+        m = _validate(raw, "test/smoke")
+        assert m.contract.runs[0].pinned == {}
+
+    def test_run_pinned_parsed(self):
+        raw = _implemented_raw()
+        raw["contract"]["runs"][0]["pinned"] = {"n_opponents": 5}
+        m = _validate(raw, "test/smoke")
+        assert m.contract.runs[0].pinned == {"n_opponents": 5}
+
+    def test_launch_config_fingerprint_default_empty(self):
+        raw = _minimal_raw()
+        m = _validate(raw, "test/smoke")
+        assert m.lifecycle.launch.config_fingerprint == {}
+
+    def test_launch_config_fingerprint_parsed(self):
+        raw = _running_raw()
+        raw["lifecycle"]["launch"]["config_fingerprint"] = {
+            "config/config.yaml": "a" * 64,
+            "config/experiment/heilbron.yaml": "b" * 64,
+        }
+        m = _validate(raw, "test/smoke")
+        assert m.lifecycle.launch.config_fingerprint["config/config.yaml"] == "a" * 64
+        assert (
+            m.lifecycle.launch.config_fingerprint["config/experiment/heilbron.yaml"]
+            == "b" * 64
+        )
+
+    def test_roundtrip_preserves_integrity_fields(self, tmp_path: Path):
+        """task_group, pinned, config_fingerprint survive load → dump → reload."""
+        raw = _running_raw()
+        raw["contract"]["config"]["task_group"] = "heilbron"
+        raw["contract"]["config"]["pinned"] = {"n_opponents": 3}
+        raw["contract"]["runs"][0]["pinned"] = {"n_opponents": 5}
+        raw["lifecycle"]["launch"]["config_fingerprint"] = {
+            "config/config.yaml": "c" * 64
+        }
+
+        path = tmp_path / "experiment.yaml"
+        with open(path, "w") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+
+        with open(path) as f:
+            loaded = yaml.safe_load(f)
+        m = _validate(loaded, "test/smoke")
+        assert m.contract.config.task_group == "heilbron"
+        assert m.contract.config.pinned == {"n_opponents": 3}
+        assert m.contract.runs[0].pinned == {"n_opponents": 5}
+        assert m.lifecycle.launch.config_fingerprint == {"config/config.yaml": "c" * 64}
+
+
+# ---------------------------------------------------------------------------
+# State transitions
+# ---------------------------------------------------------------------------
+
+
+class TestTransitions:
+    def test_all_valid_transitions(self):
+        """Every status in VALID_TRANSITIONS maps to valid statuses."""
+        valid_statuses = {s.value for s in Status}
+        for source, targets in VALID_TRANSITIONS.items():
+            assert source.value in valid_statuses
+            for t in targets:
+                assert t.value in valid_statuses
+
+    def test_preregistered_to_implemented(self):
+        assert "implemented" in VALID_TRANSITIONS["preregistered"]
+
+    def test_implemented_to_running(self):
+        assert "running" in VALID_TRANSITIONS["implemented"]
+
+    def test_running_to_complete(self):
+        assert "complete" in VALID_TRANSITIONS["running"]
+
+    def test_running_to_invalid(self):
+        assert "invalid" in VALID_TRANSITIONS["running"]
+
+    def test_complete_is_terminal(self):
+        assert VALID_TRANSITIONS["complete"] == set()
+
+    def test_invalid_to_preregistered(self):
+        assert "preregistered" in VALID_TRANSITIONS["invalid"]
+
+    def test_no_backward_in_normal_mode(self):
+        assert "preregistered" not in VALID_TRANSITIONS["implemented"]
+        assert "implemented" not in VALID_TRANSITIONS["running"]
+
+
+# ---------------------------------------------------------------------------
+# Atomic writes
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicWrite:
+    def test_write_then_rename(self, tmp_path: Path):
+        target = tmp_path / "test.yaml"
+        data = {"key": "value", "nested": {"a": 1}}
+        write_manifest_atomic(target, data)
+
+        assert target.exists()
+        with open(target) as f:
+            loaded = yaml.safe_load(f)
+        assert loaded == data
+
+    def test_tmp_cleaned_up(self, tmp_path: Path):
+        target = tmp_path / "test.yaml"
+        write_manifest_atomic(target, {"x": 1})
+        tmp = target.with_suffix(".yaml.tmp")
+        assert not tmp.exists()
+
+    def test_overwrites_existing(self, tmp_path: Path):
+        target = tmp_path / "test.yaml"
+        write_manifest_atomic(target, {"version": 1})
+        write_manifest_atomic(target, {"version": 2})
+        with open(target) as f:
+            loaded = yaml.safe_load(f)
+        assert loaded["version"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Load from disk (with mocked PROJ)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadManifest:
+    def test_load_valid(self, tmp_experiment):
+        exp_name, tmp_root = tmp_experiment
+        with patch("gigaevo.experiment.manifest.PROJ", tmp_root):
+            m = load_manifest(exp_name)
+        assert m.contract.identity.name == "test/smoke"
+        assert m.lifecycle.status == "preregistered"
+
+    def test_load_missing_file(self, tmp_path):
+        with patch("gigaevo.experiment.manifest.PROJ", tmp_path):
+            with pytest.raises(FileNotFoundError):
+                load_manifest("nonexistent/exp")
+
+    def test_load_invalid_yaml(self, tmp_experiment):
+        exp_name, tmp_root = tmp_experiment
+        path = tmp_root / "experiments" / "test" / "smoke" / "experiment.yaml"
+        path.write_text("{{invalid yaml: [")
+        with patch("gigaevo.experiment.manifest.PROJ", tmp_root):
+            with pytest.raises((yaml.YAMLError, ValueError)):
+                load_manifest(exp_name)
+
+
+# ---------------------------------------------------------------------------
+# set_status and update_manifest (with mocked Redis)
+# ---------------------------------------------------------------------------
+
+
+class TestSetStatus:
+    def _setup_experiment(self, tmp_path: Path, raw: dict) -> tuple[str, Path]:
+        exp_dir = tmp_path / "experiments" / "test" / "smoke"
+        exp_dir.mkdir(parents=True)
+        path = exp_dir / "experiment.yaml"
+        with open(path, "w") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+        return "test/smoke", tmp_path
+
+    def _mock_redis(self):
+        mock_r = MagicMock()
+        mock_r.set.return_value = True  # lock acquired
+        mock_r.get.return_value = None
+        return mock_r
+
+    def test_valid_transition(self, tmp_path: Path):
+        raw = _implemented_raw()
+        exp_name, root = self._setup_experiment(tmp_path, raw)
+        mock_r = self._mock_redis()
+
+        with (
+            patch("gigaevo.experiment.manifest.PROJ", root),
+            patch("gigaevo.experiment.manifest.get_redis", return_value=mock_r),
+        ):
+            # Need to add running requirements
+            raw["contract"]["runs"][0]["pid"] = 99999
+            raw["lifecycle"]["launch"] = {"time": "2026-01-01", "commit": "abc"}
+            path = root / "experiments" / "test" / "smoke" / "experiment.yaml"
+            with open(path, "w") as f:
+                yaml.safe_dump(raw, f, sort_keys=False)
+
+            m = set_status(exp_name, "running")
+            assert m.lifecycle.status == "running"
+
+    def test_invalid_transition_rejected(self, tmp_path: Path):
+        raw = _minimal_raw(status="preregistered")
+        exp_name, root = self._setup_experiment(tmp_path, raw)
+        mock_r = self._mock_redis()
+
+        with (
+            patch("gigaevo.experiment.manifest.PROJ", root),
+            patch("gigaevo.experiment.manifest.get_redis", return_value=mock_r),
+        ):
+            with pytest.raises(ValueError, match="Invalid transition"):
+                set_status(exp_name, "running")
+
+    def test_recovery_transition(self, tmp_path: Path):
+        raw = _running_raw()
+        exp_name, root = self._setup_experiment(tmp_path, raw)
+        mock_r = self._mock_redis()
+
+        with (
+            patch("gigaevo.experiment.manifest.PROJ", root),
+            patch("gigaevo.experiment.manifest.get_redis", return_value=mock_r),
+        ):
+            # Normal transition: running -> implemented is NOT allowed
+            with pytest.raises(ValueError, match="Invalid transition"):
+                set_status(exp_name, "implemented")
+
+            # Recovery transition: allowed with flag
+            # But we need to re-write the file since validation changes status
+            with open(root / "experiments/test/smoke/experiment.yaml", "w") as f:
+                yaml.safe_dump(raw, f, sort_keys=False)
+
+            m = recover_status(exp_name, "implemented")
+            assert m.lifecycle.status == "implemented"
+
+
+class TestUpdateManifest:
+    def test_update_in_place(self, tmp_path: Path):
+        raw = _minimal_raw()
+        exp_dir = tmp_path / "experiments" / "test" / "smoke"
+        exp_dir.mkdir(parents=True)
+        path = exp_dir / "experiment.yaml"
+        with open(path, "w") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+
+        mock_r = MagicMock()
+        mock_r.set.return_value = True
+
+        def add_tracking_issue(raw):
+            raw["contract"]["identity"]["tracking_issue"] = 42
+
+        with (
+            patch("gigaevo.experiment.manifest.PROJ", tmp_path),
+            patch("gigaevo.experiment.manifest.get_redis", return_value=mock_r),
+        ):
+            m = update_manifest("test/smoke", add_tracking_issue)
+            assert m.contract.identity.tracking_issue == 42
+
+        # Verify persisted
+        with open(path) as f:
+            saved = yaml.safe_load(f)
+        assert saved["contract"]["identity"]["tracking_issue"] == 42
+
+
+# ---------------------------------------------------------------------------
+# DB claims (mocked Redis)
+# ---------------------------------------------------------------------------
+
+
+class TestDBClaims:
+    """Tests the Lua-backed DB claim primitives against a real fakeredis.
+
+    The functions were rewritten to use server-side Lua for atomicity and
+    owner-checked CAS on release/refresh; these tests exercise the actual
+    Redis protocol rather than mocking call-level details.
+    """
+
+    def _fake(self, monkeypatch):
+        import fakeredis
+
+        r = fakeredis.FakeRedis()
+        monkeypatch.setattr("gigaevo.experiment.manifest.get_redis", lambda: r)
+        return r
+
+    def test_claim_success(self, monkeypatch):
+        r = self._fake(monkeypatch)
+        assert claim_dbs("test/exp", [9, 10]) == []
+        assert r.get("experiments:db_claim:9") == b"test/exp"
+        assert r.get("experiments:db_claim:10") == b"test/exp"
+
+    def test_claim_collision_writes_nothing(self, monkeypatch):
+        """All-or-nothing: a single conflict prevents ANY claim from landing."""
+        r = self._fake(monkeypatch)
+        r.set("experiments:db_claim:10", "other/experiment", ex=3600)
+
+        failed = claim_dbs("test/exp", [9, 10])
+        assert failed == [(10, "other/experiment")]
+        # DB 9 must NOT have been claimed — atomic rollback.
+        assert r.get("experiments:db_claim:9") is None
+        assert r.get("experiments:db_claim:10") == b"other/experiment"
+
+    def test_claim_idempotent_same_owner(self, monkeypatch):
+        r = self._fake(monkeypatch)
+        r.set("experiments:db_claim:9", "test/exp", ex=3600)
+        assert claim_dbs("test/exp", [9]) == []
+        assert r.get("experiments:db_claim:9") == b"test/exp"
+
+    def test_claim_empty_list_is_noop(self, monkeypatch):
+        self._fake(monkeypatch)
+        assert claim_dbs("test/exp", []) == []
+
+    def test_refresh_only_refreshes_own_claims(self, monkeypatch):
+        r = self._fake(monkeypatch)
+        r.set("experiments:db_claim:9", "test/exp", ex=10)
+        r.set("experiments:db_claim:10", "other/exp", ex=10)
+
+        refreshed = refresh_db_claims("test/exp", [9, 10])
+        assert refreshed == 1
+        # Our claim got a fresh long TTL; foreign claim's TTL was left alone.
+        assert r.ttl("experiments:db_claim:9") > 100
+        assert r.ttl("experiments:db_claim:10") <= 10
+
+    def test_release_only_releases_own_claims(self, monkeypatch):
+        r = self._fake(monkeypatch)
+        r.set("experiments:db_claim:9", "test/exp", ex=3600)
+        r.set("experiments:db_claim:10", "other/exp", ex=3600)
+
+        released = release_db_claims("test/exp", [9, 10])
+        assert released == 1
+        assert r.get("experiments:db_claim:9") is None
+        # Foreign claim MUST survive — this is the whole point of CAS release.
+        assert r.get("experiments:db_claim:10") == b"other/exp"
+
+
+# ---------------------------------------------------------------------------
+# PR description generation
+# ---------------------------------------------------------------------------
+
+
+class TestGeneratePRDescription:
+    def test_preregistered(self, tmp_path: Path):
+        raw = _minimal_raw()
+        exp_dir = tmp_path / "experiments" / "test" / "smoke"
+        exp_dir.mkdir(parents=True)
+        path = exp_dir / "experiment.yaml"
+        with open(path, "w") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+
+        with patch("gigaevo.experiment.manifest.PROJ", tmp_path):
+            desc = generate_pr_description("test/smoke")
+
+        assert "Pre-registered" in desc
+        assert "test/smoke" in desc
+
+    def test_running_with_checkpoints(self, tmp_path: Path):
+        raw = _running_raw()
+        raw.setdefault("telemetry", {})["checkpoints"] = [
+            {"gen": 5, "timestamp": "2026-01-02", "notes": "ok"}
+        ]
+        exp_dir = tmp_path / "experiments" / "test" / "smoke"
+        exp_dir.mkdir(parents=True)
+        path = exp_dir / "experiment.yaml"
+        with open(path, "w") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+
+        with patch("gigaevo.experiment.manifest.PROJ", tmp_path):
+            desc = generate_pr_description("test/smoke")
+
+        assert "Running (gen 5/10)" in desc
+        assert "A1" in desc  # run label in table
+        assert "12345" in desc  # PID in table
+
+    def test_includes_baseline(self, tmp_path: Path):
+        raw = _minimal_raw()
+        raw["contract"]["baseline"] = {
+            "reference": "test/base",
+            "mean": 0.5,
+            "metric": "score",
+        }
+        exp_dir = tmp_path / "experiments" / "test" / "smoke"
+        exp_dir.mkdir(parents=True)
+        path = exp_dir / "experiment.yaml"
+        with open(path, "w") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+
+        with patch("gigaevo.experiment.manifest.PROJ", tmp_path):
+            desc = generate_pr_description("test/smoke")
+
+        assert "test/base" in desc
+        assert "0.5" in desc

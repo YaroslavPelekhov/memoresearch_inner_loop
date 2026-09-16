@@ -1,0 +1,39 @@
+# @package _global_
+
+# Route GigaEvo LLM stages through the Codex CLI using the generic command-CLI
+# wrapper. Repository mutation can still use its own coding-agent backend
+# command; this preset is for intermediate stages such as repo reflection.
+#
+# Usage:
+#   python run.py ... llm=codex
+
+llm:
+  _target_: gigaevo.llm.models.MultiModelRouter
+  _convert_: all
+  models:
+    - _target_: gigaevo.llm.command_cli.CommandCLIChatModel
+      model_name: ${oc.env:CODEX_MODEL,gpt-5.6-sol}
+      provider_name: codex
+      cwd: ${hydra:runtime.cwd}
+      timeout: ${request_timeout}
+      # Large curator/selector prompts exceed Linux's per-argument size limit
+      # when interpolated as {prompt}. Pipe them to Codex instead.
+      stdin_prompt: true
+      json_output: true
+      usage_log_path: ${hydra:runtime.output_dir}/codex_usage.jsonl
+      service_tier: ${oc.env:CODEX_SERVICE_TIER,standard}
+      context_tier: ${oc.env:CODEX_CONTEXT_TIER,short}
+      env: {}
+      command:
+        - ${hydra:runtime.cwd}/tools/codex-proxy
+        - exec
+        - --json
+        - --model
+        - ${oc.env:CODEX_MODEL,gpt-5.6-sol}
+        - --ephemeral
+        - --sandbox
+        - read-only
+        - --skip-git-repo-check
+        - "-"
+  probabilities: [1.0]
+  writer: ${writer}

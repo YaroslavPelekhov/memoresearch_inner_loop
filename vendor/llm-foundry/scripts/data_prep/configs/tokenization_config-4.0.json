@@ -1,0 +1,32 @@
+{
+  "base_image": "-",
+  "base_input_path": "-",
+  "base_output_path": "-",
+  "tokenizer_path": "-",
+  "max_tokenized_len": 8192,
+  "n_gpus": 8,
+  "n_proc": 32,
+  "script_additional_params": "tokens_dtype=uint32",
+  "datasets": {
+    "starcoder2_filtered_vocab_rarity": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 4
+    },
+    "encc_no_urls": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 8
+    },
+    "AI-MO_NuminaMath-CoT__train-merged_tasks": {
+      "script_path": "convert_dataset_hf_local.py",
+      "per_file_task_split": false,
+      "num_executors": 1
+    },
+    "AI-MO_NuminaMath-TIR__train-merged_tasks": {
+      "script_path": "convert_dataset_hf_local.py",
+      "per_file_task_split": false,
+      "num_executors": 1
+    }
+  }
+}

@@ -1,0 +1,118 @@
+# @package _global_
+
+defaults:
+  - repo_harness
+  - override /parent_selector: repeat_single
+  - override /stopper: wall_clock
+  - _self_
+
+problem:
+  name: llm_foundry_autoresearch
+
+memory_root: ${oc.env:AUTORESEARCH_MEMORY_DIR,${hydra:runtime.cwd}/runs/state/memory}
+extracted_checkpoint_dir: ${memory_root}/extracted
+approved_checkpoint_dir: ${memory_root}/approved
+review_dir: ${hydra:runtime.output_dir}/review
+review_mode: ${oc.env:AUTORESEARCH_REVIEW_MODE,mandatory}
+
+memory_provider:
+  _target_: autoresearch.gigaevo_hooks.ReviewedMemoryProvider
+  provider:
+    _target_: gigaevo.memory.provider.SelectorMemoryProvider
+    max_cards: 6
+    # The selector never opens the unreviewed extraction index.
+    checkpoint_dir: ${approved_checkpoint_dir}
+    namespace: ${namespace}
+  review_dir: ${review_dir}
+  review_mode: ${review_mode}
+
+# One reviewed idea -> one implementation -> one GPU experiment.
+num_parents: 1
+max_elites_per_generation: 1
+max_mutations_per_generation: 1
+island_max_size: 1
+primary_resolution: 1
+enable_migration: false
+dag_concurrency: 1
+# The runner-level limit is distinct from per-DAG stage concurrency. Keep both
+# at one so no future change to mutation scheduling can overlap GPU training.
+max_concurrent_dags: 1
+
+pre_step_hook:
+  _target_: autoresearch.gigaevo_hooks.ReviewedIdeaPreStepHook
+  storage: ${ref:redis_storage}
+  llm: ${ref:llm}
+  memory_provider: ${ref:memory_provider}
+  task_description: ${ref:problem_context::task_description}
+  review_dir: ${review_dir}
+  primary_key: ${primary_key}
+  review_mode: ${review_mode}
+  poll_interval_seconds: 2.0
+  # Evaluate the seed, extract/review its memory, then propose the first idea.
+  bootstrap_memory_hook: ${ref:post_step_hook}
+
+post_step_hook:
+  _target_: autoresearch.gigaevo_hooks.ReviewedMemoryPostStepHook
+  storage: ${ref:redis_storage}
+  checkpoint_dir: ${extracted_checkpoint_dir}
+  approved_checkpoint_dir: ${approved_checkpoint_dir}
+  review_dir: ${review_dir}
+  review_mode: ${review_mode}
+  poll_interval_seconds: 2.0
+  memory_provider: ${ref:memory_provider}
+  primary_key: ${primary_key}
+  task_description: ${ref:problem_context::task_description}
+  source_repo: ${repo_harness.source_repo}
+
+repo_harness:
+  source_repo: ${oc.env:AUTORESEARCH_REPO,${hydra:runtime.cwd}}
+  entrypoint: autoresearch/model/gdn.py
+  mutation_backend:
+    _target_: gigaevo.repo_harness.backends.CommandCodingAgentBackend
+    name: codex
+    stdin_prompt: true
+    service_tier: ${oc.env:CODEX_SERVICE_TIER,standard}
+    context_tier: ${oc.env:CODEX_CONTEXT_TIER,short}
+    command:
+      - ${hydra:runtime.cwd}/tools/codex-proxy
+      - exec
+      - --model
+      - ${oc.env:CODEX_MODEL,gpt-5.6-sol}
+      - --ephemeral
+      - --approve-for-me
+      - --skip-git-repo-check
+      - --cd
+      - "{worktree}"
+      - "-"
+  allowed_changed_files:
+    - autoresearch/model/gdn.py
+  active_idea_path: ${review_dir}/active_idea.json
+  smoke_commands:
+    - ["${python_executable:}", -m, autoresearch.benchmark, --dry-run]
+  mutation_timeout: 2400
+  benchmark_command:
+    - ${python_executable:}
+    - tools/run-autoresearch-benchmark.py
+    - --gpus
+    - ${oc.env:AUTORESEARCH_GPUS_PER_CANDIDATE,1}
+    - --train-microbatch-size
+    - ${oc.env:AUTORESEARCH_TRAIN_MICROBATCH_SIZE,16}
+    - --eval-batch-size
+    - ${oc.env:AUTORESEARCH_EVAL_BATCH_SIZE,32}
+    - --loader-workers
+    - ${oc.env:AUTORESEARCH_LOADER_WORKERS,8}
+    - --gradient-log-interval
+    - ${oc.env:AUTORESEARCH_GRADIENT_LOG_INTERVAL,20}
+    - --disable-optimizer-metrics
+    - --run-dir
+    - ${oc.env:AUTORESEARCH_RUN_ROOT,${hydra:runtime.cwd}/runs}/candidates/{commit}
+  # A 1B-token screen is ~8.2h on the measured single GPU and expected to be
+  # roughly 2-2.5h on four GPUs. Keep timeout policy human-owned and generous.
+  benchmark_timeout: ${oc.decode:${oc.env:AUTORESEARCH_BENCHMARK_TIMEOUT,43200}}
+  staged_validation:
+    enabled: false
+
+# Keep the normal repo-harness pipeline so exact metrics, diffs, artifacts, and
+# Codex reflection are available to memory extraction after each experiment.
+stage_timeout: ${oc.decode:${oc.env:AUTORESEARCH_STAGE_TIMEOUT,43800}}
+dag_timeout: ${oc.decode:${oc.env:AUTORESEARCH_DAG_TIMEOUT,44400}}

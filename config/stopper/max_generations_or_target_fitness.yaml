@@ -1,0 +1,7 @@
+_target_: gigaevo.evolution.engine.stopper.CompositeStopper
+mode: any
+children:
+  - _target_: gigaevo.evolution.engine.stopper.MaxGenerationsStopper
+    max_generations: ${max_generations}
+  - _target_: gigaevo.evolution.engine.stopper.TargetFitnessStopper
+    target_fitness: ${target_fitness}

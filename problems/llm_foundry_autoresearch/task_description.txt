@@ -1,0 +1,20 @@
+Evolve the Gated DeltaNet component of a fixed approximately-140M-parameter
+hybrid causal language model trained and evaluated with the vendored LLM
+Foundry library. Even-numbered layers use GDN and odd-numbered layers use fixed
+Transformer attention. Candidate parameter count must remain within 1% of the
+measured hybrid baseline so capacity is not the treatment.
+
+The training dataset, tokenizer, model scale, optimizer, schedule, evaluation
+tasks, metric aggregation, and launcher are fixed by the experiment definition.
+The active research idea is reviewed by a human before implementation.
+
+Candidate implementations may change only:
+
+- autoresearch/model/gdn.py
+
+The primary objective is the raw equal-weighted LLM Foundry evaluation score
+over tasks tagged ``core``. Prefer coherent, mechanism-driven GDN changes.
+Do not modify training or evaluation code, data paths, task definitions, metric
+parsing, timeouts, fixed Transformer layers, hybrid layer placement, or the
+fixed base configuration. Every implementation must remain faithful to the
+active research idea; implementation details may evolve, but the idea may not.

@@ -1,0 +1,22 @@
+id: dclm-hybrid-gdn-one-idea
+title: One fixed idea, implementation evolution only
+description: >-
+  Test whether GigaEvo can faithfully and steadily improve implementations of
+  one fixed Gated DeltaNet idea. Every candidate is screened at 1024 batches;
+  only a new short-horizon record is promoted to a 4096-batch confirmation, and
+  only a confirmed long-horizon improvement becomes the next parent.
+fixed_contract:
+  - Odd decoder layers use the unchanged Llama Transformer attention.
+  - Even decoder layers use the mutable AutoresearchGatedDeltaNet.
+  - Dataset, tokenizer, scale, optimizer, schedule, and LM Foundry LanguageCrossEntropy are fixed.
+  - Only autoresearch/model/gdn.py may change.
+  - A technical failure is not scientific evidence against the fixed idea.
+mutable_files:
+  - autoresearch/model/gdn.py
+canonical_ref: HEAD
+proposal_count: 5
+parent_candidate_count: 1
+evolution_generations: 500
+screen_batches: 1024
+confirmation_batches: 4096
+screen_eval_batches: 32

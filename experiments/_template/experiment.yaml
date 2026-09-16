@@ -1,0 +1,115 @@
+schema_version: 2
+contract:
+  identity:
+    name: <task>/<name>
+    task: <task>
+    branch: exp/<name>
+    pr_number: null
+    tracking_issue: null
+    prereg_commit: null
+  problem:
+    has_test_set: true
+    test_set_path: null
+    test_set_sha256: null
+    max_val_test_gap: null
+    fitness_type: discrete
+    metric_name: <metric>
+  config:
+    # task_group: <name>   # optional — loads config/experiment/<name>.yaml
+    #                      # as task-level tradition; emitted as
+    #                      # experiment=<task_group> (FIRST Hydra override).
+    pipeline: standard
+    shared_overrides:
+      num_parents: 1
+      max_elites_per_generation: 8
+      max_mutations_per_generation: 8
+      stage_timeout: 3000
+      dag_timeout: 7200
+      mutation_mode: rewrite
+      significant_change: 0.01
+  # Per-run entries. Framework convention (I-06):
+  #   runs[].prefix MUST equal runs[].problem_name (watchdog adversarial
+  #   plugin matches opponents by pop_a/pop_b suffix; dataset_snapshot.json
+  #   is keyed by problem path). For adversarial pairs, each run's
+  #   extra_overrides should include opponent_redis_prefix=<other_pop>,
+  #   again equal to the opponent's problem_name — NOT a URL-like
+  #   <task>/<exp-name>/pop_b namespace.
+  runs: []
+  servers: []
+  custom_env: {}
+  max_generations: 25
+  baseline:
+    reference: null
+    mean: null
+    metric: null
+  tools: []
+lifecycle:
+  status: preregistered
+  launch:
+    time: null
+    commit: null
+    confirmed_at: null
+  smoke_test:
+    completed: false
+    db: null
+    generations: 3
+    log_path: null
+    completed_at: null
+  treatment_verification:
+    completed: false
+    completed_at: null
+    note: null
+telemetry:
+  checkpoints: []
+  mid_run_test_eval:
+    completed: false
+    completed_at: null
+  checkpoint_analysis:
+    mid_run:
+      completed: false
+      completed_at: null
+  treatment_checks:
+    completed: false
+    completed_at: null
+    results: []
+control_plane:
+  watchdog:
+    plugin: solo
+    sentinel_value: -1.0
+    plot_metrics:
+    - fitness
+    plot_commands:
+    - command: comparison
+      args:
+        metric: fitness
+        smoothing: ema
+        window: 10
+        annotate-frontier: true
+        max-annotations: 3
+      output_name: evolution_runs_comparison.png
+      caption: All runs vs baseline
+    alert_thresholds:
+      invalidity_rate: 0.75
+      stagnation_window: 10
+      generation_gap_threshold: 5
+    poll_interval_s: 3600
+    plot_retries: 3
+    plot_retry_delay_s: 30
+    rolling_comment_threshold_hours: 24
+    checkpoint_milestones:
+    - 0.1
+    - 0.2
+    - 0.5
+    - 1.0
+    no_proxy_hosts: []
+  notifications:
+    pr:
+      enabled: true
+      comment_mode: rolling
+    telegram:
+      enabled: true
+      chat_id_env: TELEGRAM_CHAT_ID
+      token_env: TELEGRAM_BOT_TOKEN
+  watchdog_pid: null
+  anomaly_detector_cron_id: null
+  checkpoint_cron_id: null

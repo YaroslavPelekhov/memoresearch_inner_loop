@@ -1,0 +1,148 @@
+version: 1
+description: >
+  Terminal-Bench 2 agent harness repo. It provides the default
+  agents.baseline_terminus2:AgentHarness import path and vendors Harbor's
+  Terminus-2 agent architecture so mutation agents can inspect and edit the
+  loop, parsers, session handling, prompts, and timeout behavior directly.
+default_variant: minimal-agent
+variants:
+  minimal-agent:
+    description: Importable vendored Terminus-2 baseline agent package.
+    package_files:
+      - package: harbor.agents.terminus_2
+        destination: agents/terminus_2
+        include:
+          - "*.py"
+          - "*.sh"
+          - "templates/*.txt"
+        import_rewrites:
+          harbor.agents.terminus_2: agents.terminus_2
+    files:
+      README.md:
+        content: |
+          # Terminal-Bench 2 Terminus-2 Seed
+
+          This repository is a minimal Harbor agent harness for Terminal-Bench 2.
+          It preserves the default import path used by the benchmark adapter:
+
+          `agents.baseline_terminus2:AgentHarness`
+
+          The repository vendors Harbor's Terminus-2 agent architecture under
+          `agents/terminus_2/`, so mutation agents can change the actual loop,
+          parsers, terminal session handling, prompt templates, and timeout
+          behavior instead of only wrapping an installed dependency.
+
+          Runtime knobs used by Harbor live in `gigaevo_agent_config.json`.
+          GigaEvo's benchmark adapter reads this file and passes `agent_kwargs`
+          to Harbor, so evolution can tune values such as `max_turns`,
+          summarization threshold, response tokens, and temperature.
+      gigaevo_agent_config.json:
+        content: |
+          {
+            "agent_kwargs": {
+              "max_turns": 30,
+              "model_info": {
+                "max_input_tokens": 220000,
+                "max_output_tokens": 20000,
+                "input_cost_per_token": 0,
+                "output_cost_per_token": 0
+              },
+              "proactive_summarization_threshold": 30000,
+              "llm_call_kwargs": {
+                "max_tokens": 20000
+              },
+              "temperature": 0.2
+            }
+          }
+      agents/__init__.py:
+        content: |
+          """Vendored Terminus-2 agent package for repo-harness auto-seeding."""
+      agents/baseline_terminus2.py:
+        content: |
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+          from typing import Any
+
+          from agents.terminus_2.terminus_2 import Terminus2
+          from harbor.environments.base import BaseEnvironment
+          from harbor.models.agent.context import AgentContext
+
+          DEFAULT_MAX_TURNS = 80
+
+
+          def _env_int(name: str, default: int) -> int:
+              raw = os.environ.get(name)
+              if raw is None or raw == "":
+                  return default
+              try:
+                  value = int(raw)
+              except ValueError:
+                  return default
+              return value if value > 0 else default
+
+
+          class AgentHarness(Terminus2):
+              """Harbor-compatible Terminus-2 harness for Terminal-Bench 2.
+
+              This keeps GigaEvo's stable import path while delegating terminal
+              operation, LLM calls, parsing, logging, and metrics to the
+              repository-local vendored Terminus-2 implementation.
+              """
+
+              SUPPORTS_WINDOWS = False
+
+              @staticmethod
+              def name() -> str:
+                  return "gigaevo-terminus2-seed"
+
+              def version(self) -> str | None:
+                  return "0.1.0"
+
+              def __init__(
+                  self,
+                  logs_dir: Path,
+                  model_name: str | None = None,
+                  *args: Any,
+                  **kwargs: Any,
+              ) -> None:
+                  kwargs.setdefault(
+                      "max_turns",
+                      _env_int("GIGAEVO_MAX_TURNS", DEFAULT_MAX_TURNS),
+                  )
+                  kwargs.setdefault("parser_name", "json")
+                  kwargs.setdefault("enable_summarize", True)
+                  kwargs.setdefault("proactive_summarization_threshold", 6000)
+                  kwargs.setdefault("record_terminal_session", False)
+                  kwargs.setdefault("suppress_max_turns_warning", True)
+                  super().__init__(
+                      logs_dir=logs_dir,
+                      model_name=model_name,
+                      *args,
+                      **kwargs,
+                  )
+
+              async def run(
+                  self,
+                  instruction: str,
+                  environment: BaseEnvironment,
+                  context: AgentContext,
+              ) -> None:
+                  return await super().run(
+                      self._augment_instruction(instruction),
+                      environment,
+                      context,
+                  )
+
+              def _augment_instruction(self, instruction: str) -> str:
+                  return (
+                      instruction.rstrip()
+                      + "\n\n"
+                      + "General operating guidance:\n"
+                      + "- Start by inspecting the working directory, task files, and any tests or verifier hints.\n"
+                      + "- Prefer small, reversible commands that reveal state before editing files.\n"
+                      + "- Use existing project tooling when present; otherwise use direct shell, Python, and standard Unix tools.\n"
+                      + "- After changing files, run the narrowest relevant checks you can discover.\n"
+                      + "- Do not mark the task complete until the requested artifact or repository state exists and a check supports it.\n"
+                  )

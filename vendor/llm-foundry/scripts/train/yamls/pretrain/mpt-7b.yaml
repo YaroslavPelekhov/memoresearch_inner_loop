@@ -1,0 +1,159 @@
+max_seq_len: 2048
+global_seed: 17
+
+# Run Name
+run_name: red_pajama_librusec_train/lr3e-4_bs4M_fp32_accum # If left blank, will be read from env var $RUN_NAME
+
+# Model
+model:
+  name: mpt_causal_lm
+  init_device: meta
+  d_model: 4096
+  n_heads: 32
+  n_layers: 32
+  expansion_ratio: 4
+  max_seq_len: ${max_seq_len}
+  vocab_size: 131072
+  no_bias: true
+  attn_config:
+    attn_impl: triton
+    alibi: true
+    alibi_bias_max: 8
+
+
+# Tokenizer
+tokenizer:
+  name: /home/jovyan/tokenizer_rugpt
+  kwargs:
+    model_max_length: ${max_seq_len}
+
+# Dataloaders
+train_loader:
+  name: text
+  dataset:
+    epoch_size: 500m
+    streams:
+      cc:
+        proportion: 67
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: common_crawl
+      c4:
+        proportion: 15
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: c4
+      github:
+        proportion: 4.5
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: github
+      wiki:
+        proportion: 4.5
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: wikipedia
+      books:
+        proportion: 4.5
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: book
+      arxiv:
+        proportion: 2.5
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: arxiv
+      stackexchange:
+        proportion: 2.0
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: stackexchange
+      librusec_fb:
+        proportion: 5.0
+        remote: /home/jovyan/isbaskov/mpt_train
+        split: librusec_fb
+    shuffle: true
+    max_seq_len: ${max_seq_len}
+    shuffle_seed: ${global_seed}
+  drop_last: true
+  num_workers: 8
+
+eval_loader:
+  name: text
+  dataset:
+    remote: /home/jovyan/runfme/llm-foundry_/scripts/train/my-copy-c4
+    split: val
+    shuffle: false
+    max_seq_len: ${max_seq_len}
+    shuffle_seed: ${global_seed}
+  drop_last: false
+  num_workers: 8
+
+# Optimization
+scheduler:
+  name: cosine_with_warmup
+  t_warmup: 3000ba
+  alpha_f: 0.1
+
+optimizer:
+  name: decoupled_adamw
+  lr: 3.0e-4
+  betas:
+  - 0.9
+  - 0.95
+  eps: 1.0e-08
+  weight_decay: 0.0
+
+algorithms:
+  gradient_clipping:
+    clipping_type: norm
+    clipping_threshold: 1.0
+
+max_duration: 250000ba # ~ 1Т tokens
+eval_interval: 2000ba
+eval_first: false
+eval_subset_num_batches: -1
+global_train_batch_size: 2048
+
+# System
+seed: ${global_seed}
+device_eval_batch_size: 4
+device_train_microbatch_size: 4
+# device_train_microbatch_size: auto
+precision: amp_bf16
+
+# FSDP
+fsdp_config:
+  sharding_strategy: FULL_SHARD
+  mixed_precision:
+    param_dtype: bf16
+    reduce_dtype: fp32
+    buffer_dtype: fp32
+  activation_checkpointing: false
+  activation_checkpointing_reentrant: false
+  activation_cpu_offload: false
+  limit_all_gathers: true
+  verbose: false
+
+# Logging
+progress_bar: false
+log_to_console: true
+console_log_interval: 50ba
+
+callbacks:
+  speed_monitor:
+    window_size: 10
+  lr_monitor: {}
+  memory_monitor: {}
+  runtime_estimator: {}
+  optimizer_monitor: {batch_log_interval: 50}
+
+auto_log_hparams: true
+
+loggers:
+  tensorboard:
+    log_dir: '/home/jovyan/runfme/llm-foundry_experiments/red_pajama_librusec_train/lr3e-4_bs4M/tensorboard_fp32_accum'
+    rank_zero_only: true
+
+# Checkpoint to local filesystem or remote object store
+save_interval: 2000ba
+# save_num_checkpoints_to_keep: 1  # Important, this cleans up checkpoints saved to DISK
+save_folder: /home/jovyan/runfme/llm-foundry_experiments/red_pajama_librusec_train/lr3e-4_bs4M/ckpt
+# save_folder: s3://my-bucket/my-folder/{run_name}/checkpoints
+
+# Load from local filesystem or remote object store
+# load_path: ./gpt-7b/checkpoints/latest-rank{rank}.pt
+# load_path: s3://my-bucket/my-folder/gpt-7b/checkpoints/latest-rank{rank}.pt

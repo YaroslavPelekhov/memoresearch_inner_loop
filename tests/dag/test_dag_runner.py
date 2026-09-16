@@ -1,0 +1,973 @@
+"""Tests for gigaevo/runner/dag_runner.py"""
+
+import asyncio
+import contextlib
+from datetime import UTC
+import time
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from gigaevo.programs.program import Program
+from gigaevo.programs.program_state import ProgramState
+from gigaevo.runner.dag_runner import (
+    DagRunner,
+    DagRunnerConfig,
+    DagRunnerMetrics,
+    TaskInfo,
+)
+
+
+class TestDagRunnerConfig:
+    def test_defaults(self):
+        config = DagRunnerConfig()
+        assert config.poll_interval == 0.5
+        assert config.max_concurrent_dags == 8
+        assert config.dag_timeout == 3600
+        assert config.metrics_collection_interval == 1.0
+
+    def test_poll_interval_too_small(self):
+        with pytest.raises(ValueError, match="poll_interval"):
+            DagRunnerConfig(poll_interval=0.001)
+
+    def test_poll_interval_gt_zero(self):
+        with pytest.raises(ValueError):
+            DagRunnerConfig(poll_interval=0)
+
+    def test_max_concurrent_dags_gt_zero(self):
+        with pytest.raises(ValueError):
+            DagRunnerConfig(max_concurrent_dags=0)
+
+    def test_dag_timeout_gt_zero(self):
+        with pytest.raises(ValueError):
+            DagRunnerConfig(dag_timeout=0)
+
+    def test_poll_interval_upper_bound(self):
+        with pytest.raises(ValueError):
+            DagRunnerConfig(poll_interval=61.0)
+
+
+class TestDagRunnerMetrics:
+    def test_initial_values(self):
+        m = DagRunnerMetrics()
+        assert m.loop_iterations == 0
+        assert m.dag_runs_started == 0
+        assert m.dag_runs_completed == 0
+        assert m.dag_errors == 0
+        assert m.dag_timeouts == 0
+        assert m.orphaned_programs_discarded == 0
+        assert m.dag_build_failures == 0
+        assert m.state_update_failures == 0
+
+    def test_increment_loop_iterations(self):
+        m = DagRunnerMetrics()
+        m.increment_loop_iterations()
+        assert m.loop_iterations == 1
+
+    def test_increment_dag_runs_started(self):
+        m = DagRunnerMetrics()
+        m.increment_dag_runs_started()
+        assert m.dag_runs_started == 1
+
+    def test_increment_dag_runs_completed(self):
+        m = DagRunnerMetrics()
+        m.increment_dag_runs_completed()
+        assert m.dag_runs_completed == 1
+
+    def test_increment_dag_errors(self):
+        m = DagRunnerMetrics()
+        m.increment_dag_errors()
+        assert m.dag_errors == 1
+
+    def test_success_rate_no_finished(self):
+        m = DagRunnerMetrics()
+        assert m.success_rate == 1.0
+
+    def test_success_rate_all_success(self):
+        m = DagRunnerMetrics()
+        m.dag_runs_completed = 10
+        assert m.success_rate == pytest.approx(1.0)
+
+    def test_success_rate_with_errors(self):
+        m = DagRunnerMetrics()
+        m.dag_runs_completed = 8
+        m.dag_errors = 2
+        assert m.success_rate == pytest.approx(0.8)
+
+    def test_record_timeout(self):
+        m = DagRunnerMetrics()
+        m.record_timeout()
+        assert m.dag_timeouts == 1
+        assert m.dag_errors == 1
+
+    def test_record_orphaned(self):
+        m = DagRunnerMetrics()
+        m.record_orphaned()
+        assert m.orphaned_programs_discarded == 1
+        assert m.dag_errors == 1
+
+    def test_record_build_failure(self):
+        m = DagRunnerMetrics()
+        m.record_build_failure()
+        assert m.dag_build_failures == 1
+        assert m.dag_errors == 1
+
+    def test_record_state_update_failure(self):
+        m = DagRunnerMetrics()
+        m.record_state_update_failure()
+        assert m.state_update_failures == 1
+        assert m.dag_errors == 1
+
+    def test_uptime_seconds(self):
+        m = DagRunnerMetrics()
+        # Should be at least 0 (just created)
+        assert m.uptime_seconds >= 0
+
+
+class TestDagRunnerLifecycle:
+    def _make_runner(self):
+        from gigaevo.runner.dag_runner import DagRunner
+
+        storage = MagicMock()
+        storage.close = AsyncMock()
+        storage.wait_for_activity = AsyncMock()
+
+        dag_blueprint = MagicMock()
+        config = DagRunnerConfig()
+        writer = MagicMock()
+        writer.bind = MagicMock(return_value=writer)
+
+        runner = DagRunner(storage, dag_blueprint, config, writer)
+        return runner
+
+    async def test_start_creates_task(self):
+        runner = self._make_runner()
+        runner.start()
+        assert runner._task is not None
+        assert not runner._stopping
+        # Cleanup
+        await runner.stop()
+
+    async def test_start_idempotent(self):
+        runner = self._make_runner()
+        runner.start()
+        task1 = runner._task
+        runner.start()  # should warn, not create second task
+        assert runner._task is task1
+        await runner.stop()
+
+    async def test_stop_cancels(self):
+        runner = self._make_runner()
+        runner.start()
+        assert runner._task is not None
+        await runner.stop()
+        assert runner._task is None
+
+    def test_active_count_initially_zero(self):
+        runner = self._make_runner()
+        assert runner.active_count() == 0
+
+
+class TestTaskInfo:
+    def test_named_tuple_fields(self):
+        mock_task = MagicMock()
+        info = TaskInfo(task=mock_task, program_id="abc-123", started_at=1000.0)
+        assert info.task is mock_task
+        assert info.program_id == "abc-123"
+        assert info.started_at == 1000.0
+
+
+# ---------------------------------------------------------------------------
+# Helpers for behavioral tests
+# ---------------------------------------------------------------------------
+
+
+def _make_test_program(state=ProgramState.QUEUED):
+    return Program(code="def solve(): return 42", state=state, atomic_counter=999)
+
+
+def _make_mock_storage():
+    storage = MagicMock()
+    storage.close = AsyncMock()
+    storage.wait_for_activity = AsyncMock()
+    storage.get = AsyncMock(return_value=None)
+    storage.mget = AsyncMock(return_value=[])
+    storage.add = AsyncMock()
+    storage.update = AsyncMock()
+    storage.write_exclusive = AsyncMock()
+    storage.exists = AsyncMock(return_value=True)
+    storage.get_ids_by_status = AsyncMock(return_value=[])
+    storage.publish_status_event = AsyncMock()
+    storage.transition_status = AsyncMock()
+    storage.atomic_state_transition = AsyncMock()
+    storage.fast_state_transition = AsyncMock()
+    storage.batch_transition_state = AsyncMock(return_value=0)
+    storage.batch_transition_by_ids = AsyncMock(
+        side_effect=lambda ids, *a, **kw: len(ids)
+    )
+    return storage
+
+
+def _make_mock_writer():
+    writer = MagicMock()
+    writer.bind = MagicMock(return_value=writer)
+    writer.scalar = MagicMock()
+    writer.text = MagicMock()
+    return writer
+
+
+def _make_mock_dag(run_side_effect=None):
+    dag = MagicMock()
+    dag.run = AsyncMock(side_effect=run_side_effect)
+    dag.automata = MagicMock()
+    dag.automata.topology = MagicMock()
+    dag.automata.topology.nodes = MagicMock()
+    dag.state_manager = MagicMock()
+    dag._writer = MagicMock()
+    dag._stage_sema = MagicMock()
+    return dag
+
+
+def _make_runner(storage=None, dag_blueprint=None, config=None, writer=None):
+    storage = storage or _make_mock_storage()
+    dag_blueprint = dag_blueprint or MagicMock()
+    config = config or DagRunnerConfig()
+    writer = writer or _make_mock_writer()
+    return DagRunner(storage, dag_blueprint, config, writer)
+
+
+# ---------------------------------------------------------------------------
+# TestDagRunnerLaunch
+# ---------------------------------------------------------------------------
+
+
+class TestDagRunnerLaunch:
+    async def test_queued_program_transitions_to_running(self):
+        """Add QUEUED program to storage, call _launch(), verify it becomes active."""
+        prog = _make_test_program(state=ProgramState.QUEUED)
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: [prog.id] if s == ProgramState.QUEUED.value else []
+        )
+        storage.mget = AsyncMock(return_value=[prog])
+
+        mock_dag = _make_mock_dag()
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(return_value=mock_dag)
+
+        runner = _make_runner(storage=storage, dag_blueprint=blueprint)
+        await runner._launch()
+
+        assert prog.id in runner._active
+        assert runner._metrics.dag_runs_started == 1
+        # Cleanup
+        for info in list(runner._active.values()):
+            info.task.cancel()
+            try:
+                await info.task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def test_respects_max_concurrent_capacity(self):
+        """Set max_concurrent_dags=1, add 3 QUEUED programs, verify only 1 is active."""
+        progs = [_make_test_program() for _ in range(3)]
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: (
+                [p.id for p in progs] if s == ProgramState.QUEUED.value else []
+            )
+        )
+        storage.mget = AsyncMock(return_value=progs)
+
+        mock_dag = _make_mock_dag()
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(return_value=mock_dag)
+
+        config = DagRunnerConfig(max_concurrent_dags=1, prefetch_factor=1)
+        runner = _make_runner(storage=storage, dag_blueprint=blueprint, config=config)
+        await runner._launch()
+
+        assert len(runner._active) == 1
+        # Cleanup
+        for info in list(runner._active.values()):
+            info.task.cancel()
+            try:
+                await info.task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def test_skips_already_active_programs(self):
+        """Put a program in _active dict, call _launch(), verify it's not re-launched."""
+        prog = _make_test_program(state=ProgramState.QUEUED)
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: [prog.id] if s == ProgramState.QUEUED.value else []
+        )
+        storage.mget = AsyncMock(return_value=[prog])
+
+        mock_dag = _make_mock_dag()
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(return_value=mock_dag)
+
+        runner = _make_runner(storage=storage, dag_blueprint=blueprint)
+        # Pre-populate _active with this program
+        dummy_task = asyncio.create_task(asyncio.sleep(100))
+        runner._active[prog.id] = TaskInfo(
+            task=dummy_task, program_id=prog.id, started_at=time.monotonic()
+        )
+
+        await runner._launch()
+        # Should still have only the original task
+        assert runner._active[prog.id].task is dummy_task
+        assert blueprint.build.call_count == 0
+
+        dummy_task.cancel()
+        try:
+            await dummy_task
+        except asyncio.CancelledError:
+            pass
+
+    async def test_orphaned_running_discarded(self):
+        """RUNNING program not in _active gets DISCARDED."""
+        prog = _make_test_program(state=ProgramState.RUNNING)
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: [prog.id] if s == ProgramState.RUNNING.value else []
+        )
+        storage.mget = AsyncMock(return_value=[prog])
+
+        runner = _make_runner(storage=storage)
+        await runner._launch()
+
+        assert runner._metrics.orphaned_programs_discarded == 1
+        assert runner._metrics.dag_errors == 1
+        # fast_state_transition should have been called to discard with DISCARDED state
+        storage.fast_state_transition.assert_called()
+        call_args = storage.fast_state_transition.call_args
+        assert call_args[0][2] == ProgramState.DISCARDED.value
+
+    async def test_mark_running_failure_does_not_create_task(self):
+        """If the RUNNING transition fails, no DAG task is created."""
+        prog = _make_test_program(state=ProgramState.QUEUED)
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: [prog.id] if s == ProgramState.QUEUED.value else []
+        )
+        storage.mget = AsyncMock(return_value=[prog])
+        # Make the batch RUNNING transition fail
+        storage.batch_transition_by_ids = AsyncMock(
+            side_effect=RuntimeError("Redis timeout")
+        )
+
+        mock_dag = _make_mock_dag()
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(return_value=mock_dag)
+
+        runner = _make_runner(storage=storage, dag_blueprint=blueprint)
+        await runner._launch()
+
+        # After failure, program should NOT be in _active
+        assert prog.id not in runner._active
+
+    async def test_fast_dags_cannot_become_false_orphans(self):
+        """RUNNING is persisted before cached DAGs can finish and write DONE.
+
+        This models the refresh race where five cached DAGs completed while the
+        launcher's batched QUEUED→RUNNING write was still in flight.  The stale
+        launch write used to overwrite DONE and orphan all five programs.
+        """
+        programs = [_make_test_program() for _ in range(5)]
+        programs_by_id = {program.id: program for program in programs}
+        states = {program.id: ProgramState.QUEUED for program in programs}
+        storage = _make_mock_storage()
+
+        async def get_ids_by_status(status: str):
+            return [pid for pid, state in states.items() if state.value == status]
+
+        async def mget(program_ids):
+            result = []
+            for pid in program_ids:
+                program = programs_by_id.get(pid)
+                if program is not None:
+                    program.state = states[pid]
+                result.append(program)
+            return result
+
+        async def transition_by_ids(program_ids, old_state, new_state):
+            # Snapshot before yielding, matching RedisProgramStorage's MGET then
+            # later pipeline write.  Old launch ordering allowed DAGs to write
+            # DONE during this yield and then overwrote them with RUNNING.
+            eligible = [
+                pid for pid in program_ids if states[pid].value == old_state
+            ]
+            await asyncio.sleep(0)
+            for pid in eligible:
+                states[pid] = ProgramState(new_state)
+            return len(eligible)
+
+        async def transition_state(batch, old_state, new_state):
+            for program in batch:
+                assert states[program.id].value == old_state
+                states[program.id] = ProgramState(new_state)
+                program.state = ProgramState(new_state)
+            return len(batch)
+
+        async def fast_transition(program, old_state, new_state):
+            states[program.id] = ProgramState(new_state)
+
+        storage.get_ids_by_status = AsyncMock(side_effect=get_ids_by_status)
+        storage.mget = AsyncMock(side_effect=mget)
+        storage.batch_transition_by_ids = AsyncMock(side_effect=transition_by_ids)
+        storage.batch_transition_state = AsyncMock(side_effect=transition_state)
+        storage.fast_state_transition = AsyncMock(side_effect=fast_transition)
+
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(side_effect=lambda *a, **kw: _make_mock_dag())
+        config = DagRunnerConfig(max_concurrent_dags=5, prefetch_factor=1)
+        runner = _make_runner(
+            storage=storage, dag_blueprint=blueprint, config=config
+        )
+
+        await runner._launch()
+        await asyncio.gather(*(info.task for info in runner._active.values()))
+        await runner._maintain()
+        await runner._launch()
+
+        assert set(states.values()) == {ProgramState.DONE}
+        assert runner._metrics.orphaned_programs_discarded == 0
+
+    async def test_mget_returns_partial_results(self):
+        """When mget returns [prog, None], only the non-None program is launched."""
+        prog = _make_test_program(state=ProgramState.QUEUED)
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: (
+                [prog.id, "deleted-id"] if s == ProgramState.QUEUED.value else []
+            )
+        )
+        storage.mget = AsyncMock(return_value=[prog, None])
+
+        mock_dag = _make_mock_dag()
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(return_value=mock_dag)
+
+        runner = _make_runner(storage=storage, dag_blueprint=blueprint)
+        await runner._launch()
+
+        # Only the real program should be launched
+        assert prog.id in runner._active
+        assert "deleted-id" not in runner._active
+        assert len(runner._active) == 1
+
+        # Cleanup
+        for info in list(runner._active.values()):
+            info.task.cancel()
+            try:
+                await info.task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def test_build_failure_discards_program(self):
+        """DAGBlueprint.build() raises -> program DISCARDED, metrics incremented."""
+        prog = _make_test_program(state=ProgramState.QUEUED)
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: [prog.id] if s == ProgramState.QUEUED.value else []
+        )
+        storage.mget = AsyncMock(return_value=[prog])
+
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(side_effect=RuntimeError("build failed"))
+
+        runner = _make_runner(storage=storage, dag_blueprint=blueprint)
+        await runner._launch()
+
+        assert runner._metrics.dag_build_failures == 1
+        assert runner._metrics.dag_errors == 1
+        assert prog.id not in runner._active
+
+
+# ---------------------------------------------------------------------------
+# TestDagRunnerMaintain
+# ---------------------------------------------------------------------------
+
+
+class TestDagRunnerMaintain:
+    async def test_finished_task_harvested(self):
+        """Done asyncio.Task in _active gets removed, dag_runs_completed incremented."""
+        runner = _make_runner()
+
+        # Create a task that completes immediately
+        async def noop():
+            pass
+
+        task = asyncio.create_task(noop())
+        await task  # ensure it's done
+
+        runner._active["prog-1"] = TaskInfo(
+            task=task, program_id="prog-1", started_at=time.monotonic()
+        )
+
+        await runner._maintain()
+
+        assert "prog-1" not in runner._active
+        assert runner._metrics.dag_runs_completed == 1
+
+    async def test_timed_out_task_cancelled(self):
+        """Pending task with started_at in the past gets cancelled, dag_timeouts incremented."""
+        storage = _make_mock_storage()
+        prog = _make_test_program(state=ProgramState.RUNNING)
+        storage.get = AsyncMock(return_value=prog)
+
+        config = DagRunnerConfig(dag_timeout=1.0)
+        runner = _make_runner(storage=storage, config=config)
+
+        # Create a task that will take a long time
+        task = asyncio.create_task(asyncio.sleep(3600))
+
+        # Set started_at far in the past so it's timed out
+        runner._active["prog-1"] = TaskInfo(
+            task=task, program_id="prog-1", started_at=time.monotonic() - 100
+        )
+
+        await runner._maintain()
+
+        assert "prog-1" not in runner._active
+        assert runner._metrics.dag_timeouts == 1
+        assert runner._metrics.dag_errors == 1
+        # Verify DISCARDED state was set on the program
+        storage.fast_state_transition.assert_called()
+        call_args = storage.fast_state_transition.call_args
+        assert call_args[0][2] == ProgramState.DISCARDED.value
+
+    async def test_unharvested_done_tasks_block_capacity(self):
+        """Done tasks in _active block capacity until _maintain harvests them."""
+        storage = _make_mock_storage()
+
+        async def noop():
+            pass
+
+        # Create 2 done tasks
+        task1 = asyncio.create_task(noop())
+        task2 = asyncio.create_task(noop())
+        await task1
+        await task2
+
+        config = DagRunnerConfig(max_concurrent_dags=2, prefetch_factor=1)
+        runner = _make_runner(storage=storage, config=config)
+
+        runner._active["p1"] = TaskInfo(
+            task=task1, program_id="p1", started_at=time.monotonic()
+        )
+        runner._active["p2"] = TaskInfo(
+            task=task2, program_id="p2", started_at=time.monotonic()
+        )
+
+        # Capacity check: len(_active) == 2, max == 2 -> capacity == 0
+        # Even though active_count() == 0 (both tasks done)
+        assert runner.active_count() == 0
+        assert len(runner._active) == 2
+
+        # New programs queued
+        new_prog = _make_test_program()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: (
+                [new_prog.id] if s == ProgramState.QUEUED.value else []
+            )
+        )
+        storage.mget = AsyncMock(return_value=[new_prog])
+
+        mock_dag = _make_mock_dag()
+        blueprint = MagicMock()
+        blueprint.build = MagicMock(return_value=mock_dag)
+        runner._dag_blueprint = blueprint
+
+        # _launch won't launch because capacity == 0
+        await runner._launch()
+        assert new_prog.id not in runner._active
+
+        # After _maintain harvests done tasks, capacity is restored
+        await runner._maintain()
+        assert len(runner._active) == 0
+        assert runner._metrics.dag_runs_completed == 2
+
+        await runner._launch()
+        assert new_prog.id in runner._active
+
+        # Cleanup
+        for info in list(runner._active.values()):
+            info.task.cancel()
+            try:
+                await info.task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def test_failed_task_increments_errors(self):
+        """Task that raised an exception gets dag_errors incremented."""
+        runner = _make_runner()
+
+        async def failing():
+            raise RuntimeError("boom")
+
+        task = asyncio.create_task(failing())
+        # Wait for it to fail
+        try:
+            await task
+        except RuntimeError:
+            pass
+
+        runner._active["prog-1"] = TaskInfo(
+            task=task, program_id="prog-1", started_at=time.monotonic()
+        )
+
+        await runner._maintain()
+
+        assert "prog-1" not in runner._active
+        assert runner._metrics.dag_errors == 1
+
+
+# ---------------------------------------------------------------------------
+# TestDagRunnerExecuteDag
+# ---------------------------------------------------------------------------
+
+
+class TestDagRunnerExecuteDag:
+    async def test_success_sets_done(self):
+        """Mock DAG.run() to succeed, verify program is queued for batch DONE."""
+        prog = _make_test_program(state=ProgramState.RUNNING)
+        storage = _make_mock_storage()
+        runner = _make_runner(storage=storage)
+
+        mock_dag = _make_mock_dag()  # run() succeeds (returns None)
+
+        await runner._execute_dag(mock_dag, prog)
+
+        mock_dag.run.assert_awaited_once_with(prog)
+        # Successful DAGs queue for batch RUNNING→DONE in _maintain
+        assert prog in runner._done_queue
+        # fast_state_transition should NOT be called (batched instead)
+        storage.fast_state_transition.assert_not_called()
+
+    async def test_failure_sets_discarded(self):
+        """Mock DAG.run() to raise, verify state becomes DISCARDED."""
+        prog = _make_test_program(state=ProgramState.RUNNING)
+        storage = _make_mock_storage()
+        runner = _make_runner(storage=storage)
+
+        mock_dag = _make_mock_dag(run_side_effect=RuntimeError("dag failed"))
+
+        await runner._execute_dag(mock_dag, prog)
+
+        mock_dag.run.assert_awaited_once_with(prog)
+        storage.fast_state_transition.assert_called()
+        call_args = storage.fast_state_transition.call_args
+        assert call_args[0][2] == ProgramState.DISCARDED.value
+
+    async def test_execute_dag_cleanup_after_crash(self):
+        """When dag.run() raises, the finally block still cleans up DAG internals."""
+        prog = _make_test_program(state=ProgramState.RUNNING)
+        storage = _make_mock_storage()
+        runner = _make_runner(storage=storage)
+
+        mock_dag = _make_mock_dag(run_side_effect=RuntimeError("dag crashed"))
+
+        await runner._execute_dag(mock_dag, prog)
+
+        # Verify teardown was called to release references
+        mock_dag.teardown.assert_called_once()
+
+    async def test_execute_dag_cleanup_nullifies_references(self):
+        """After successful _execute_dag, DAG references are set to None."""
+        prog = _make_test_program(state=ProgramState.RUNNING)
+        storage = _make_mock_storage()
+        runner = _make_runner(storage=storage)
+
+        mock_dag = _make_mock_dag()  # run() succeeds
+
+        await runner._execute_dag(mock_dag, prog)
+
+        # Verify teardown was called to release references
+        mock_dag.teardown.assert_called_once()
+
+    async def test_execute_dag_state_update_failure_logged(self):
+        """When DAG fails and set_program_state fails, state_update_failures increments."""
+        prog = _make_test_program(state=ProgramState.RUNNING)
+        storage = _make_mock_storage()
+        # Make the state transition fail after a failing DAG run
+        storage.atomic_state_transition = AsyncMock(
+            side_effect=RuntimeError("Redis down")
+        )
+        storage.fast_state_transition = AsyncMock(
+            side_effect=RuntimeError("Redis down")
+        )
+        runner = _make_runner(storage=storage)
+
+        # DAG must FAIL so _execute_dag uses per-program set_program_state
+        # (successful DAGs queue for batch and never call set_program_state)
+        mock_dag = _make_mock_dag(run_side_effect=RuntimeError("dag failed"))
+
+        await runner._execute_dag(mock_dag, prog)
+
+        assert runner._metrics.state_update_failures == 1
+        assert runner._metrics.dag_errors == 1
+
+
+# ---------------------------------------------------------------------------
+# TestDagRunnerRun
+# ---------------------------------------------------------------------------
+
+
+class TestDagRunnerRun:
+    """Tests for the main _run() loop: error recovery, cancellation, ordering."""
+
+    async def test_transient_error_does_not_kill_loop(self):
+        """An exception inside _launch() should be caught and the loop continues."""
+        storage = _make_mock_storage()
+        runner = _make_runner(storage=storage)
+
+        call_count = 0
+
+        async def failing_launch():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient Redis failure")
+            # On second call, signal stop so the loop exits
+            runner._stopping = True
+
+        runner._launch = failing_launch
+        runner._maintain = AsyncMock()
+        storage.wait_for_activity = AsyncMock()
+
+        await runner._run()
+
+        # The loop ran at least twice (once with error, once to stop)
+        assert call_count >= 2
+        assert runner._metrics.loop_iterations >= 2
+
+    async def test_cancellation_propagates_from_run(self):
+        """CancelledError inside the _run loop should propagate upward."""
+        runner = _make_runner()
+
+        runner._maintain = AsyncMock(side_effect=asyncio.CancelledError())
+        runner._launch = AsyncMock()
+
+        with pytest.raises(asyncio.CancelledError):
+            await runner._run()
+
+    async def test_maintain_runs_before_launch(self):
+        """_maintain() is always called before _launch() in each iteration."""
+        runner = _make_runner()
+        call_order = []
+
+        async def record_maintain():
+            call_order.append("maintain")
+
+        async def record_launch():
+            call_order.append("launch")
+            runner._stopping = True  # stop after first iteration
+
+        runner._maintain = record_maintain
+        runner._launch = record_launch
+        runner._storage.wait_for_activity = AsyncMock()
+
+        await runner._run()
+
+        # Exactly maintain then launch in sequence
+        assert call_order == ["maintain", "launch"]
+
+
+# ---------------------------------------------------------------------------
+# TestGCTiming
+# ---------------------------------------------------------------------------
+
+
+class TestGCTiming:
+    """Tests for garbage collection timing logic in _maintain()."""
+
+    async def test_gc_triggered_after_30s(self):
+        """GC is triggered when more than 30s have passed since last GC."""
+        runner = _make_runner()
+        # Set last GC time far in the past
+        runner._last_gc_time = time.monotonic() - 60.0
+
+        # Create a finished task so the GC branch is entered
+        async def noop():
+            pass
+
+        task = asyncio.create_task(noop())
+        await task
+
+        runner._active["prog-gc"] = TaskInfo(
+            task=task, program_id="prog-gc", started_at=time.monotonic()
+        )
+
+        old_gc_time = runner._last_gc_time
+
+        with patch("gigaevo.runner.dag_runner.gc.collect") as mock_gc:
+            await runner._maintain()
+            mock_gc.assert_called_once()
+
+        # GC should have updated _last_gc_time
+        assert runner._last_gc_time > old_gc_time
+        assert "prog-gc" not in runner._active
+
+    async def test_no_gc_if_recent(self):
+        """GC is NOT triggered when less than 30s have passed since last GC."""
+        runner = _make_runner()
+        # Set last GC time to very recent
+        runner._last_gc_time = time.monotonic()
+
+        async def noop():
+            pass
+
+        task = asyncio.create_task(noop())
+        await task
+
+        runner._active["prog-nogc"] = TaskInfo(
+            task=task, program_id="prog-nogc", started_at=time.monotonic()
+        )
+
+        gc_time_before = runner._last_gc_time
+
+        with patch("gigaevo.runner.dag_runner.gc.collect") as mock_gc:
+            await runner._maintain()
+            mock_gc.assert_not_called()
+
+        # GC should NOT have updated _last_gc_time
+        assert runner._last_gc_time == gc_time_before
+        assert "prog-nogc" not in runner._active
+
+
+# ---------------------------------------------------------------------------
+# TestCancelTask
+# ---------------------------------------------------------------------------
+
+
+class TestCancelTask:
+    """Tests for the _cancel_task() helper."""
+
+    async def test_done_task_is_noop(self):
+        """Cancelling an already-done task does nothing (early return)."""
+        runner = _make_runner()
+
+        async def noop():
+            pass
+
+        task = asyncio.create_task(noop())
+        await task
+        assert task.done()
+
+        info = TaskInfo(task=task, program_id="done-prog", started_at=time.monotonic())
+
+        # Should not raise, should return immediately
+        await runner._cancel_task(info)
+        # Task is still done (not modified)
+        assert task.done()
+
+    async def test_timeout_on_stuck_task(self):
+        """Task that ignores cancellation triggers the TimeoutError branch."""
+        runner = _make_runner()
+
+        # A task that catches CancelledError and keeps running
+        async def stubborn():
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                # Ignore cancellation and keep blocking
+                # (but with a short sleep so the test doesn't hang)
+                await asyncio.sleep(10)
+
+        task = asyncio.create_task(stubborn())
+        # Let the task start
+        await asyncio.sleep(0)
+
+        info = TaskInfo(task=task, program_id="stuck-prog", started_at=time.monotonic())
+
+        # _cancel_task has a 2s timeout; the stubborn task sleeps 10s after cancel
+        # This should log a warning about the task not terminating
+        await runner._cancel_task(info)
+
+        # After _cancel_task returns (via TimeoutError), task may still be running
+        # Clean up the task
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+# ---------------------------------------------------------------------------
+# TestMaintainEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestMaintainEdgeCases:
+    """Edge cases in _maintain(): state update failures, storage fetch failures."""
+
+    async def test_timeout_state_update_failure_logged(self):
+        """When storage.get fails during timeout handling, error is logged not raised."""
+        storage = _make_mock_storage()
+        # Make storage.get raise during timeout handling
+        storage.get = AsyncMock(side_effect=RuntimeError("storage unavailable"))
+
+        config = DagRunnerConfig(dag_timeout=1.0)
+        runner = _make_runner(storage=storage, config=config)
+
+        # Create a running task that has timed out
+        task = asyncio.create_task(asyncio.sleep(3600))
+        runner._active["prog-fail"] = TaskInfo(
+            task=task, program_id="prog-fail", started_at=time.monotonic() - 100
+        )
+
+        # Should not raise despite storage failure
+        await runner._maintain()
+
+        # Task should be removed from active (cleanup still happens)
+        assert "prog-fail" not in runner._active
+
+    async def test_orphan_fetch_failure_does_not_crash(self):
+        """When mget fails for orphaned programs, _launch() continues."""
+        storage = _make_mock_storage()
+        storage.get_ids_by_status = AsyncMock(
+            side_effect=lambda s: (
+                ["orphan-id"] if s == ProgramState.RUNNING.value else []
+            )
+        )
+        # Make orphan mget fail
+        storage.mget = AsyncMock(side_effect=RuntimeError("mget failed"))
+
+        runner = _make_runner(storage=storage)
+        # Should not raise
+        await runner._launch()
+
+        # No orphans discarded since fetch failed
+        assert runner._metrics.orphaned_programs_discarded == 0
+
+
+# ---------------------------------------------------------------------------
+# TestMetricsComputed
+# ---------------------------------------------------------------------------
+
+
+class TestMetricsComputed:
+    """Tests for computed metric properties."""
+
+    def test_average_iterations_per_second_nonzero(self):
+        """average_iterations_per_second returns loop_iterations / uptime_seconds."""
+        m = DagRunnerMetrics()
+        # Simulate some iterations with known uptime
+        m.loop_iterations = 100
+        # Manually set started_at to 10 seconds ago
+        from datetime import datetime, timedelta
+
+        m.started_at = datetime.now(UTC) - timedelta(seconds=10)
+        result = m.average_iterations_per_second
+        # Should be approximately 10 iterations/second
+        assert result > 0.0
+        assert result == pytest.approx(10.0, rel=0.5)
+
+    def test_average_iterations_per_second_zero_uptime(self):
+        """average_iterations_per_second returns 0.0 when uptime is 0."""
+        m = DagRunnerMetrics()
+        m.loop_iterations = 50
+        # started_at is just now, so uptime_seconds == 0
+        assert m.average_iterations_per_second == 0.0

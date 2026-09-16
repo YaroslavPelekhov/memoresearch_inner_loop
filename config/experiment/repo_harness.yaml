@@ -1,0 +1,136 @@
+# @package _global_
+
+defaults:
+  - /constants: base
+  - /redis: default
+  - /llm: codex
+  - /prompts: default
+  - /prompt_fetcher: fixed
+  - /evolution: default
+  - /parent_selector: meta_repo
+  - /algorithm: repo_harness_single_island
+  - /pipeline: repo_harness
+  - /runner: default
+  - /scheduling: fifo
+  - /loader: repo_seed
+  - /logging: tensorboard
+  - /metrics: default
+  - /post_step_hook: null
+
+# Repo-harness evaluations can run long external benchmarks. Keep the DAG
+# budget above the per-stage budget so the stage timeout remains effective.
+stage_timeout: 15000
+dag_timeout: 17000
+
+repo_harness:
+  # Existing Git repo containing the candidate artifact to evolve. If null,
+  # set auto_seed.enabled=true to create a deterministic placeholder repo from
+  # the problem's repo_harness_seed.yaml.
+  source_repo: null
+  effective_source_repo: null
+  auto_seed:
+    enabled: false
+    # Defaults to ../repo_harness_seeds relative to the GigaEvo repo root.
+    root: null
+    # Optional explicit path. If null, GigaEvo searches under problem.dir for
+    # exactly one repo_harness_seed.yaml or repo_harness_seed.yml.
+    spec_path: null
+    # Optional variant inside the seed spec for tasks with multiple repo shapes.
+    variant: null
+    # Optional ordered variants to materialize as distinct Git seed refs. This
+    # makes every selected variant an independent initial Program/parent.
+    variants: null
+    # Defaults to redis.prefix, producing one seed repo namespace per run.
+    name: null
+    initial_commit_message: gigaevo initial auto seed
+  seed_ref: HEAD
+  # Populated automatically when auto_seed.variants is used. May also be set
+  # explicitly for an existing source repository.
+  seed_refs: null
+  entrypoint: null
+  init_if_needed: false
+  create_initial_commit: false
+  initial_commit_message: gigaevo initial repo seed
+
+  # Low-candidate-count defaults for expensive coding-agent mutation.
+  mutation_backend:
+    _target_: gigaevo.repo_harness.backends.DryRunCodingAgentBackend
+  branch_prefix: gigaevo/candidate
+  mutation_worktree_root: ${hydra:runtime.output_dir}/repo_mutation/worktrees
+  mutation_log_root: ${hydra:runtime.output_dir}/repo_mutation/logs
+  mutation_timeout: 2400
+  smoke_commands: []
+  smoke_timeout: 300
+  smoke_shell: false
+  allow_no_changes: false
+  keep_mutation_worktrees: true
+  max_feedback_chars: 60000
+  max_parent_diff_chars: 20000
+  max_parent_reflection_chars: 6000
+  # Null preserves the general repo-harness behavior. Narrow experiments can
+  # reject a candidate before benchmarking when it edits any other file.
+  allowed_changed_files: null
+  # When set, mutation is impossible until the file contains an approved idea.
+  active_idea_path: null
+  # Optional state file whose single last_failure record is shown to the next
+  # coding agent. It is deliberately separate from scientific memory.
+  recent_failure_path: null
+
+  # The command should emit metrics JSON on stdout by default, for example:
+  #   {"fitness": 0.42, "is_valid": 1.0}
+  benchmark_command: ???
+  benchmark_shell: false
+  benchmark_timeout: null
+  benchmark_env: null
+  metrics_path: null
+  # Optional richer feedback. Benchmark adapters can either write this JSON file
+  # in the candidate worktree or emit a marker such as
+  # "[gigaevo] structured feedback:" followed by one JSON object on stderr.
+  structured_feedback_path: null
+  structured_feedback_markers: null
+  stdout_json: true
+  fail_on_nonzero: false
+  eval_worktree_root: ${hydra:runtime.output_dir}/repo_eval/worktrees
+  eval_artifact_root: ${hydra:runtime.output_dir}/repo_eval/artifacts
+  capture_eval_artifacts: true
+  max_artifact_files: 200
+  max_artifact_file_bytes: 50000000
+  max_artifact_total_bytes: 250000000
+  keep_eval_worktrees: false
+  feedback_tail_chars: 24000
+  staged_validation:
+    # Evaluate a child first on the primary parent's failed benchmark cases.
+    # If that subset does not improve, stop early and project the full score
+    # from the parent's known successes plus the child's subset result.
+    enabled: true
+    primary_metric: ${primary_key}
+    # Benchmarks can alternatively use {selected_cases_*} placeholders or the
+    # GIGAEVO_BENCHMARK_SELECTED_CASES env vars. These flags cover common CLIs.
+    case_arg_names:
+      - --tasks
+      - --task
+      - --cases
+      - --case
+    case_joiner: ","
+    case_failure_threshold: 0.999999
+    min_improvement: 0.000001
+    max_cases: null
+
+  # Repo-level insight/lineage reflection. This runs after benchmarking and
+  # feeds a compact diff + metric-delta summary into the next mutation brief.
+  reflection_max_diff_chars: 20000
+  reflection_max_feedback_chars: 20000
+  reflection_max_prompt_tokens: 150000
+  reflection_prompt_token_encoding: o200k_base
+  reflection_max_trace_excerpt_chars: 18000
+  reflection_fail_open: true
+  reflection_skip_clear_regressions: true
+  reflection_skip_invalid: true
+  reflection_regression_skip_tolerance: 0.000001
+
+# Repo harness defaults favor meta-selected recombination: when more than one
+# elite exists, the configured parent selector asks the LLM to rank complementary
+# parent sets from scores, reflections, and compact own-improvement diffs.
+max_elites_per_generation: 2
+max_mutations_per_generation: 1
+num_parents: 2

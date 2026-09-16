@@ -1,0 +1,28 @@
+# @package _global_
+
+# Route GigaEvo LLM stages through any non-interactive local CLI.
+#
+# Usage:
+#   python run.py ... llm=command_cli \
+#     'llm.models.0.command=["opencode","run","--prompt","{prompt}"]' \
+#     llm.models.0.model_name=opencode-cli \
+#     llm.models.0.provider_name=opencode
+#
+# The command may reference {prompt}, {prompt_path}, and {cwd}. Set
+# llm.models.0.stdin_prompt=true for CLIs that read the prompt from stdin.
+# It must print the model response to stdout and exit nonzero on failure.
+
+llm:
+  _target_: gigaevo.llm.models.MultiModelRouter
+  _convert_: all
+  models:
+    - _target_: gigaevo.llm.command_cli.CommandCLIChatModel
+      model_name: command-cli
+      provider_name: command-cli
+      cwd: ${hydra:runtime.cwd}
+      timeout: ${request_timeout}
+      command: ???
+      stdin_prompt: false
+      env: {}
+  probabilities: [1.0]
+  writer: ${writer}

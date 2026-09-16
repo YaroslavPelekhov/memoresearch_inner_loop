@@ -1,0 +1,232 @@
+digraph GigaEvoRepoHarnessSlide {
+  graph [
+    rankdir=LR,
+    bgcolor="white",
+    pad="0.28",
+    nodesep="0.45",
+    ranksep="0.65",
+    splines=spline,
+    fontname="Arial",
+    labelloc=t,
+    label="GigaEvo Repo-Harness Framework",
+    fontsize=28,
+    fontcolor="#0f172a"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Arial",
+    fontsize=13,
+    fontcolor="#0f172a",
+    color="#94a3b8",
+    penwidth=1.4,
+    margin="0.14,0.10"
+  ];
+
+  edge [
+    color="#475569",
+    penwidth=1.5,
+    arrowsize=0.8,
+    fontname="Arial",
+    fontsize=10,
+    fontcolor="#334155"
+  ];
+
+  seed [
+    label="Seed repository\nexisting repo or auto-seed\ninitial Git commit",
+    fillcolor="#ecfdf5",
+    color="#059669"
+  ];
+
+  loader [
+    label="RepoSeedLoader\ncreates initial Program\nfrom HEAD/ref",
+    fillcolor="#e0f2fe",
+    color="#0284c7"
+  ];
+
+  parent_pool [
+    label="Active parent pool\nsingle island archive\nor repo top-K roles",
+    fillcolor="#dcfce7",
+    color="#16a34a",
+    penwidth=1.8
+  ];
+
+  selector [
+    label="Parent selector agent\nMetaRepoParentSelector\nranks complementary parents",
+    fillcolor="#fff7ed",
+    color="#f97316",
+    penwidth=1.8
+  ];
+
+  mutation [
+    label="Mutation operator\nRepoHarnessMutationOperator\nbuilds brief + worktree",
+    fillcolor="#f5f3ff",
+    color="#7c3aed"
+  ];
+
+  brief [
+    label="Mutation brief\nTask + selected parents\nmetrics + benchmark feedback\nreflections + diffs + artifacts",
+    fillcolor="#fff7ed",
+    color="#f97316"
+  ];
+
+  coding_agent [
+    label="Coding-agent backend\nCodex / Claude Code\nOpenCode / Pi / CLI",
+    fillcolor="#fff7ed",
+    color="#f97316",
+    penwidth=1.8
+  ];
+
+  commit [
+    label="Child commit\nagent edits worktree\nsmoke checks, commit_all\nbranch gigaevo/candidate/...",
+    fillcolor="#ecfdf5",
+    color="#059669"
+  ];
+
+  child_program [
+    label="Child Program\nProgram.code = manifest JSON\nstatus QUEUED",
+    fillcolor="#dcfce7",
+    color="#16a34a"
+  ];
+
+  dag [
+    label="Program DAG runner\nruns configured stages\nfor queued candidate",
+    fillcolor="#e0f2fe",
+    color="#0284c7"
+  ];
+
+  benchmark [
+    label="RepoBenchmarkStage\ncheckout commit\nrun benchmark_command",
+    fillcolor="#fee2e2",
+    color="#dc2626",
+    penwidth=1.8
+  ];
+
+  feedback [
+    label="Organized feedback\nmetrics JSON\nstructured feedback\nstdout/stderr + artifacts",
+    fillcolor="#fee2e2",
+    color="#dc2626"
+  ];
+
+  reflection [
+    label="Reflection agent\nRepoReflectionStage\nsummarizes diff, metrics delta,\nfeedback, artifacts, risks",
+    fillcolor="#fff7ed",
+    color="#f97316",
+    penwidth=1.8
+  ];
+
+  context [
+    label="MutationContextStage\nformats reflection + metrics\nfor next generation",
+    fillcolor="#f5f3ff",
+    color="#7c3aed"
+  ];
+
+  archive [
+    label="Acceptor + strategy\nvalidate metrics\naccept / supersede /\nquarantine / discard",
+    fillcolor="#dcfce7",
+    color="#16a34a"
+  ];
+
+  redis [
+    label="Redis ProgramStorage\nmanifests, metrics, lineage,\nstage_results, metadata keys:\nrepo_benchmark_feedback\nrepo_reflection, mutation_context\narchive_roles",
+    shape=cylinder,
+    fillcolor="#f0fdf4",
+    color="#16a34a",
+    penwidth=1.8
+  ];
+
+  git [
+    label="Git repository\nstores the actual solution code\nrepo_path + commit are durable\ncandidate artifact",
+    shape=cylinder,
+    fillcolor="#f0fdf4",
+    color="#059669",
+    penwidth=1.8
+  ];
+
+  artifacts [
+    label="Run artifacts\nmutation_brief.md, prompts,\nagent logs, benchmark logs,\nartifact manifest files",
+    shape=folder,
+    fillcolor="#f8fafc",
+    color="#64748b"
+  ];
+
+  contract [
+    label="Agent communication contract\nSelector reads summaries -> parent set\nMutation agent reads brief -> Git edit\nReflection agent reads eval evidence -> markdown guidance",
+    fillcolor="#fff7ed",
+    color="#f97316"
+  ];
+
+  subgraph cluster_loop {
+    label="Evolution loop";
+    style="rounded,filled";
+    color="#cbd5e1";
+    fillcolor="#f8fafc";
+    seed;
+    loader;
+    parent_pool;
+    selector;
+    mutation;
+    brief;
+    coding_agent;
+    commit;
+    child_program;
+    dag;
+    benchmark;
+    feedback;
+    reflection;
+    context;
+    archive;
+  }
+
+  subgraph cluster_state {
+    label="Durable state and files";
+    style="rounded,filled";
+    color="#bbf7d0";
+    fillcolor="#fbfffd";
+    redis;
+    git;
+    artifacts;
+    contract;
+  }
+
+  seed -> loader;
+  loader -> parent_pool [label="initial Program"];
+  parent_pool -> selector [label="elite candidates"];
+  selector -> mutation [label="selected parent set"];
+  mutation -> brief [label="writes"];
+  brief -> coding_agent [label="prompt"];
+  coding_agent -> commit [label="repo edit"];
+  commit -> child_program [label="manifest"];
+  child_program -> dag;
+  dag -> benchmark;
+  benchmark -> feedback;
+  feedback -> reflection;
+  reflection -> context;
+  context -> archive;
+  archive -> parent_pool [label="next generation", color="#16a34a", fontcolor="#166534", penwidth=2.0];
+
+  loader -> redis [style=dashed, label="Program.code"];
+  child_program -> redis [style=dashed, label="queued child"];
+  feedback -> redis [style=dashed, label="metrics + feedback"];
+  reflection -> redis [style=dashed, label="repo_reflection"];
+  context -> redis [style=dashed, label="mutation_context"];
+  archive -> redis [style=dashed, label="state + roles"];
+  parent_pool -> redis [style=dashed, dir=both, label="read/write"];
+
+  seed -> git [style=dashed, label="source commit"];
+  mutation -> git [style=dashed, label="checkout parent"];
+  commit -> git [style=dashed, label="stores child commit"];
+  benchmark -> git [style=dashed, label="checkout candidate"];
+  reflection -> git [style=dashed, label="parent..child diff"];
+
+  brief -> artifacts [style=dashed];
+  coding_agent -> artifacts [style=dashed, label="logs"];
+  feedback -> artifacts [style=dashed, label="captured files"];
+  artifacts -> brief [style=dashed, label="paths in next brief"];
+  artifacts -> reflection [style=dashed, label="evidence"];
+
+  selector -> contract [style=dotted, arrowhead=none];
+  coding_agent -> contract [style=dotted, arrowhead=none];
+  reflection -> contract [style=dotted, arrowhead=none];
+}

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Run the first LLM Foundry autoresearch experiment with reproducible defaults.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+data_root="${AUTORESEARCH_DATA_ROOT:-$(dirname "$repo_root")/data}"
+python_bin="${AUTORESEARCH_PYTHON:-python}"
+run_name="${AUTORESEARCH_RUN_NAME:-autoresearch-$(date +%Y%m%d-%H%M%S)}"
+run_root="${AUTORESEARCH_OUTPUT_DIR:-${repo_root}/runs/${run_name}}"
+
+export AUTORESEARCH_PYTHON="$python_bin"
+export DCLM_MODEL_PATH="${DCLM_MODEL_PATH:-${data_root}/model-template-gpt-neox-140m}"
+export DCLM_MDS_PATH="${DCLM_MDS_PATH:-${data_root}/dclm-mds-3b-v1}"
+export DCLM_CORE_PATH="${DCLM_CORE_PATH:-${data_root}/dclm-core}"
+export DCLM_EVAL_CACHE_PATH="${DCLM_EVAL_CACHE_PATH:-${data_root}/eval-cache}"
+export AUTORESEARCH_RUN_ROOT="${AUTORESEARCH_RUN_ROOT:-${run_root}/training}"
+export AUTORESEARCH_MEMORY_DIR="${AUTORESEARCH_MEMORY_DIR:-${run_root}/memory}"
+export AUTORESEARCH_REVIEW_MODE="${AUTORESEARCH_REVIEW_MODE:-mandatory}"
+export AUTORESEARCH_RUN_SECONDS="${AUTORESEARCH_RUN_SECONDS:-1209600}"
+export AUTORESEARCH_EXPERIMENT_TIMEOUT_SECONDS="${AUTORESEARCH_EXPERIMENT_TIMEOUT_SECONDS:-43200}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+
+mkdir -p "$run_root"
+"$repo_root/tools/redis-start"
+
+echo "Autoresearch output: $run_root"
+echo "Review mode: $AUTORESEARCH_REVIEW_MODE"
+echo "Visible GPUs: ${CUDA_VISIBLE_DEVICES:-all visible devices}"
+
+cd "$repo_root"
+exec "$python_bin" run.py \
+    experiment=llm_foundry_autoresearch \
+    "redis.prefix=${run_name}" \
+    "hydra.run.dir=${run_root}/system" \
+    "$@"

@@ -1,0 +1,12 @@
+# @package _global_
+
+program_loader:
+  _target_: gigaevo.problems.initial_loaders.RepoSeedLoader
+  source_repo: ${repo_harness.effective_source_repo}
+  ref: ${repo_harness.seed_ref}
+  refs: ${repo_harness.seed_refs}
+  entrypoint: ${repo_harness.entrypoint}
+  init_if_needed: ${repo_harness.init_if_needed}
+  create_initial_commit: ${repo_harness.create_initial_commit}
+  initial_commit_message: ${repo_harness.initial_commit_message}
+  name: repo-seed

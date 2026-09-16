@@ -1,0 +1,27 @@
+id: dclm-hybrid-gdn-140m
+title: Fixed Transformer with evolvable Gated DeltaNet layers
+description: >-
+  Improve a fixed alternating Transformer/GDN causal language model. Research
+  ideas operate above implementation evolution: each selected idea receives one
+  seed implementation, then several generations refine implementations without
+  changing the idea. Future ideas are generated from the idea catalog and
+  idea-level takeaways, and may deliberately combine prior ideas.
+fixed_contract:
+  - Odd decoder layers use the unchanged Llama Transformer attention.
+  - Even decoder layers use the mutable AutoresearchGatedDeltaNet.
+  - Dataset, tokenizer, model scale, optimizer peak LR, WSD schedule, training steps, evaluation, and metric parsing are fixed.
+  - Candidate parameter count must remain within the measured hybrid baseline bounds.
+  - Raw evidence is auditable but only idea-level takeaways feed later idea generation.
+  - The main LR schedule is fixed to the 4096-batch horizon at every fidelity rung.
+  - Shadow probes load a read-only rung checkpoint, decay LR to zero, validate, and never write into the main branch.
+  - Decision gates use calibrated eventual-winner probabilities and remain observe-only until the winner-recall lower bound is at least 0.95.
+mutable_files:
+  - autoresearch/model/gdn.py
+canonical_ref: HEAD
+proposal_count: 5
+parent_candidate_count: 8
+evolution_generations: 4
+screen_batches: 1024
+confirmation_batches: 4096
+screen_eval_batches: 32
+multifidelity_plan: config/multifidelity/dclm-140m.yaml

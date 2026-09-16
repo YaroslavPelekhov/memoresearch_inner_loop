@@ -1,0 +1,18 @@
+id: idea-custom
+title: Replace with a concise idea title
+hypothesis: >-
+  State the falsifiable reason this change should reduce held-out language-model
+  validation loss.
+mechanism: >-
+  State the exact mechanism that every implementation mutation must preserve.
+implementation_direction: >-
+  Describe the required change inside autoresearch/model/gdn.py, including the
+  important invariants but leaving implementation details to Codex.
+success_criteria:
+  - The implementation passes the required executable smoke test.
+  - It improves the 1024-batch held-out loss enough to earn promotion.
+  - The improvement is confirmed by a lower 4096-batch held-out loss.
+risks:
+  - Describe the main numerical, memory, or optimization risk.
+source_idea_ids: []
+takeaway_ids: []

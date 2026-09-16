@@ -1,0 +1,15 @@
+# @package _global_
+
+post_step_hook:
+  _target_: gigaevo.repo_harness.viz.RepoVizPostStepHook
+  run_dir: ${hydra:runtime.output_dir}
+  out_dir: ${hydra:runtime.output_dir}/viz
+  redis_host: ${redis.host}
+  redis_port: ${redis.port}
+  redis_db: ${redis.db}
+  redis_prefix: ${redis.prefix}
+  source_repo: ${repo_harness.effective_source_repo}
+  metric: fitness
+  max_diff_chars: 24000
+  max_text_chars: 60000
+  fail_open: true

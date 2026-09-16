@@ -1,0 +1,25 @@
+# @package _global_
+
+defaults:
+  - single_island
+
+mutation_operator:
+  _target_: gigaevo.evolution.mutation.repo_harness_operator.RepoHarnessMutationOperator
+  source_repo: ${repo_harness.effective_source_repo}
+  backend: ${repo_harness.mutation_backend}
+  worktree_root: ${repo_harness.mutation_worktree_root}
+  log_root: ${repo_harness.mutation_log_root}
+  entrypoint: ${repo_harness.entrypoint}
+  branch_prefix: ${repo_harness.branch_prefix}
+  timeout: ${repo_harness.mutation_timeout}
+  smoke_commands: ${repo_harness.smoke_commands}
+  smoke_timeout: ${repo_harness.smoke_timeout}
+  smoke_shell: ${repo_harness.smoke_shell}
+  allow_no_changes: ${repo_harness.allow_no_changes}
+  keep_worktrees: ${repo_harness.keep_mutation_worktrees}
+  max_feedback_chars: ${repo_harness.max_feedback_chars}
+  max_parent_diff_chars: ${repo_harness.max_parent_diff_chars}
+  max_parent_reflection_chars: ${repo_harness.max_parent_reflection_chars}
+  allowed_changed_files: ${repo_harness.allowed_changed_files}
+  active_idea_path: ${repo_harness.active_idea_path}
+  recent_failure_path: ${repo_harness.recent_failure_path}

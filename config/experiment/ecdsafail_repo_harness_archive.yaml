@@ -1,0 +1,52 @@
+# @package _global_
+
+defaults:
+  - repo_harness_archive
+  - override /post_step_hook: repo_viz
+  - _self_
+
+problem:
+  name: ecdsafail_harness
+
+redis_storage:
+  config:
+    key_prefix: ${redis.prefix}
+
+repo_harness:
+  mutation_backend:
+    _target_: gigaevo.repo_harness.backends.CommandCodingAgentBackend
+    name: codex
+    stdin_prompt: true
+    command:
+      - codex
+      - exec
+      - --ephemeral
+      - --full-auto
+      - --sandbox
+      - workspace-write
+      - --skip-git-repo-check
+      - --cd
+      - "{worktree}"
+      - "-"
+  benchmark_command:
+    - ${oc.env:CONDA_PREFIX,/home/petranokhin/anaconda3/envs/agent_evo}/bin/python
+    - ${problem.dir}/ecdsafail/benchmark.py
+    - --candidate-repo
+    - "{worktree}"
+    - --runner
+    - ecdsafail
+    - --timeout
+    - "10800"
+  benchmark_timeout: 10800
+  mutation_timeout: 1800
+  staged_validation:
+    enabled: false
+
+max_generations: 20
+max_mutations_per_generation: 4
+max_elites_per_generation: 12
+num_parents: 2
+
+post_step_hook:
+  metric: score
+  redis_prefix: ${redis.prefix}

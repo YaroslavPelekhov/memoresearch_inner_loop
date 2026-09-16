@@ -1,0 +1,37 @@
+version: 1
+
+# Collection is deliberately observe-only until gates are calibrated on complete
+# trajectories. Setting observe_only=false is rejected unless calibrated=true.
+observe_only: true
+calibrated: false
+winner_recall_floor: 0.95
+confidence_level: 0.95
+
+# The main branch always uses this fixed scheduler horizon. Rung checkpoints do
+# not compress the LR schedule.
+schedule_reference_batches: 4096
+
+# Initial gates are preregistered placeholders from the research design. They
+# produce recommendations only; tools/calibrate-multifidelity-gates.py replaces
+# them after enough complete trajectories have been collected.
+rungs:
+  - budget_batches: 128
+    probe_batches: 64
+    kill_gate: 0.01
+    promote_gate: 0.99
+  - budget_batches: 256
+    probe_batches: 96
+    kill_gate: 0.03
+    promote_gate: 0.95
+  - budget_batches: 1024
+    probe_batches: 128
+    kill_gate: 0.10
+    promote_gate: 0.85
+  - budget_batches: 2048
+    probe_batches: 256
+    kill_gate: 0.25
+    promote_gate: 0.70
+  - budget_batches: 4096
+    probe_batches: 0
+    kill_gate: 0.49
+    promote_gate: 0.51

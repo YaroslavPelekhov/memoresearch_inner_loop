@@ -1,0 +1,4 @@
+_target_: gigaevo.evolution.engine.stopper.WallClockStopper
+# Six hours by default; long-running experiments can set the decoded numeric
+# environment value without injecting a string into WallClockStopper.
+budget_seconds: ${oc.decode:${oc.env:AUTORESEARCH_RUN_SECONDS,21600}}

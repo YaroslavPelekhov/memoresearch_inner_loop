@@ -1,0 +1,316 @@
+digraph GigaEvoRepoHarness {
+  graph [
+    rankdir=LR,
+    bgcolor="white",
+    pad="0.35",
+    nodesep="0.55",
+    ranksep="0.9",
+    splines=ortho,
+    concentrate=false,
+    fontname="Arial",
+    labelloc=t,
+    label="GigaEvo Repo-Harness Pipeline: agents, storage, feedback, and candidate lifecycle",
+    fontsize=24,
+    fontcolor="#0f172a"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    color="#94a3b8",
+    penwidth=1.3,
+    fontname="Arial",
+    fontsize=12,
+    fontcolor="#0f172a",
+    margin="0.13,0.09"
+  ];
+
+  edge [
+    color="#64748b",
+    penwidth=1.45,
+    arrowsize=0.75,
+    fontname="Arial",
+    fontsize=10,
+    fontcolor="#334155"
+  ];
+
+  config [
+    label="Experiment config\nrepo_harness.yaml\nalgorithm + pipeline + loader",
+    fillcolor="#e0f2fe",
+    color="#0284c7"
+  ];
+
+  engine [
+    label="EvolutionEngine\nidle -> select -> mutate\n-> evaluate -> ingest -> refresh",
+    fillcolor="#e0f2fe",
+    color="#0284c7",
+    penwidth=1.8
+  ];
+
+  archive [
+    label="Parent pool / archive\nsingle island MAP-Elites\nor repo top-K active roles",
+    fillcolor="#dcfce7",
+    color="#16a34a"
+  ];
+
+  parent_selector [
+    label="MetaRepoParentSelector\nagent/heuristic selects\ncomplementary parents",
+    fillcolor="#fff7ed",
+    color="#f97316"
+  ];
+
+  mutation_operator [
+    label="RepoHarnessMutationOperator\ncreates worktree, writes brief,\nruns coding-agent backend",
+    fillcolor="#f5f3ff",
+    color="#7c3aed"
+  ];
+
+  mutation_brief [
+    label="mutation_brief.md\nTask description\nparent metrics + feedback\nreflections + artifacts\nparent diffs + memory",
+    fillcolor="#fff7ed",
+    color="#f97316"
+  ];
+
+  coding_agent [
+    label="Mutation coding agent\nCodex / Claude Code\nOpenCode / Pi / CLI",
+    fillcolor="#fff7ed",
+    color="#f97316",
+    penwidth=1.8
+  ];
+
+  mutation_worktree [
+    label="Mutation worktree\nchecked out at primary\nparent commit",
+    fillcolor="#ecfdf5",
+    color="#059669"
+  ];
+
+  smoke [
+    label="Optional smoke checks\ncheap local validation\nbefore commit",
+    fillcolor="#fef9c3",
+    color="#ca8a04"
+  ];
+
+  child_commit [
+    label="Child Git commit\nbranch: gigaevo/candidate/...\nchanged_files + diff_stat",
+    fillcolor="#ecfdf5",
+    color="#059669",
+    penwidth=1.8
+  ];
+
+  runner [
+    label="Runner / Program DAG\nexecutes stage graph\nfor QUEUED programs",
+    fillcolor="#e0f2fe",
+    color="#0284c7"
+  ];
+
+  benchmark [
+    label="RepoBenchmarkStage\ncheckout candidate commit\nrun benchmark_command",
+    fillcolor="#fee2e2",
+    color="#dc2626",
+    penwidth=1.8
+  ];
+
+  bench_output [
+    label="Benchmark output\nmetrics JSON\nstructured feedback\nstdout/stderr + artifacts",
+    fillcolor="#fee2e2",
+    color="#dc2626"
+  ];
+
+  ensure_metrics [
+    label="EnsureMetricsStage\nvalidate scalar metrics\nfitness, is_valid, ...",
+    fillcolor="#fef9c3",
+    color="#ca8a04"
+  ];
+
+  reflection [
+    label="RepoReflectionStage\nreflection agent summarizes\nGit diff + metric delta\nfeedback + artifacts",
+    fillcolor="#fff7ed",
+    color="#f97316",
+    penwidth=1.8
+  ];
+
+  descriptor [
+    label="RepoDescriptorStage\narchive variant only\nrisk + failure + role descriptors",
+    fillcolor="#f5f3ff",
+    color="#7c3aed"
+  ];
+
+  mutation_context [
+    label="MutationContextStage\nformats feedback/reflection\nfor the next mutation",
+    fillcolor="#f5f3ff",
+    color="#7c3aed"
+  ];
+
+  acceptor [
+    label="StandardEvolutionAcceptor\nstate + metric validity\nrequired behavior keys",
+    fillcolor="#fef9c3",
+    color="#ca8a04"
+  ];
+
+  strategy [
+    label="Strategy.add / reindex\naccept active parent\nor discard/supersede/quarantine",
+    fillcolor="#dcfce7",
+    color="#16a34a",
+    penwidth=1.8
+  ];
+
+  source_repo [
+    label="Source / auto-seeded Git repo\nreal harness files live here",
+    fillcolor="#ecfdf5",
+    color="#059669",
+    penwidth=1.8
+  ];
+
+  seed_loader [
+    label="RepoSeedLoader\nHEAD/ref -> initial Program\nProgram.code = manifest JSON",
+    fillcolor="#e0f2fe",
+    color="#0284c7"
+  ];
+
+  redis [
+    label="Redis ProgramStorage\nProgram.code: RepoCandidateManifest\nProgram.metrics: scalar scores\nmetadata: feedback/reflection/context\nlineage + status + stage_results",
+    shape=cylinder,
+    fillcolor="#dcfce7",
+    color="#16a34a",
+    penwidth=1.8
+  ];
+
+  git_storage [
+    label="Git stores solution code\nrepo_path + commit are the durable artifact\nbranches keep candidate commits",
+    fillcolor="#ecfdf5",
+    color="#059669"
+  ];
+
+  artifact_storage [
+    label="Hydra output directory\nmutation logs, prompts,\nbenchmark stdout/stderr,\nevaluation artifacts",
+    shape=folder,
+    fillcolor="#f8fafc",
+    color="#64748b"
+  ];
+
+  manifest [
+    label="RepoCandidateManifest\nkind=repo_snapshot\nrepo_path, commit, parent_commit\nbranch, entrypoint, changed_files",
+    fillcolor="#f8fafc",
+    color="#64748b"
+  ];
+
+  subgraph cluster_seed {
+    label="1. Seed and persistent state";
+    color="#cbd5e1";
+    fillcolor="#f8fafc";
+    style="rounded,filled";
+    config;
+    source_repo;
+    seed_loader;
+    redis;
+    git_storage;
+    manifest;
+    artifact_storage;
+  }
+
+  subgraph cluster_mutation {
+    label="2. Parent selection and mutation agents";
+    color="#fed7aa";
+    fillcolor="#fffaf0";
+    style="rounded,filled";
+    engine;
+    archive;
+    parent_selector;
+    mutation_operator;
+    mutation_brief;
+    coding_agent;
+    mutation_worktree;
+    smoke;
+    child_commit;
+  }
+
+  subgraph cluster_eval {
+    label="3. Evaluation DAG and feedback organization";
+    color="#fecaca";
+    fillcolor="#fff7f7";
+    style="rounded,filled";
+    runner;
+    benchmark;
+    bench_output;
+    ensure_metrics;
+    reflection;
+    descriptor;
+    mutation_context;
+    acceptor;
+    strategy;
+  }
+
+  config -> seed_loader [label="configures"];
+  source_repo -> seed_loader [label="seed ref"];
+  seed_loader -> manifest [label="builds"];
+  manifest -> redis [label="initial Program"];
+  source_repo -> git_storage [label="commits/files"];
+
+  redis -> archive [label="active DONE programs"];
+  engine -> archive [label="select_elites"];
+  archive -> parent_selector [label="elite summaries"];
+  redis -> parent_selector [label="metrics, lineage,\nreflections, roles"];
+  git_storage -> parent_selector [label="compact diffs"];
+
+  parent_selector -> mutation_operator [label="selected parent set\n+ rationale"];
+  mutation_operator -> mutation_worktree [label="git worktree at\nprimary commit"];
+  redis -> mutation_brief [label="parent feedback,\nmutation_context"];
+  git_storage -> mutation_brief [label="parent diffs"];
+  artifact_storage -> mutation_brief [label="artifact paths"];
+  mutation_operator -> mutation_brief [label="writes"];
+  mutation_brief -> coding_agent [label="prompt contract"];
+  coding_agent -> mutation_worktree [label="edits repo files"];
+  mutation_worktree -> smoke [label="optional"];
+  smoke -> child_commit [label="commit_all"];
+  child_commit -> git_storage [label="durable solution code"];
+  child_commit -> manifest [label="child manifest"];
+  manifest -> redis [label="child Program\nQUEUED"];
+  artifact_storage -> redis [style=dashed, label="log paths"];
+
+  redis -> runner [label="QUEUED child"];
+  runner -> benchmark [label="stage 1"];
+  git_storage -> benchmark [label="checkout commit"];
+  benchmark -> bench_output [label="benchmark_command"];
+  bench_output -> artifact_storage [label="captured files"];
+  bench_output -> redis [label="repo_benchmark_feedback\nrepo_evaluation_artifacts"];
+  bench_output -> ensure_metrics [label="metrics"];
+  ensure_metrics -> reflection [label="validated metrics"];
+  git_storage -> reflection [label="parent..child diff"];
+  redis -> reflection [label="parent/child feedback\nmetrics + lineage"];
+  artifact_storage -> reflection [label="artifact paths"];
+  reflection -> redis [label="repo_reflection"];
+  reflection -> mutation_context [label="formatted markdown"];
+  ensure_metrics -> mutation_context [label="metrics block"];
+  ensure_metrics -> descriptor [label="archive variant"];
+  reflection -> descriptor [label="reflection"];
+  descriptor -> redis [label="repo_descriptors\narchive_roles"];
+  mutation_context -> redis [label="mutation_context"];
+  redis -> acceptor [label="DONE candidate"];
+  acceptor -> strategy [label="accepted candidate"];
+  strategy -> archive [label="active parent pool"];
+  strategy -> redis [label="state/role updates"];
+  archive -> engine [label="next generation", color="#16a34a", fontcolor="#166534"];
+
+  legend_storage [
+    label="Green = durable state/storage",
+    fillcolor="#dcfce7",
+    color="#16a34a"
+  ];
+  legend_agents [
+    label="Orange = LLM / coding-agent communication",
+    fillcolor="#fff7ed",
+    color="#f97316"
+  ];
+  legend_eval [
+    label="Red = benchmark/evaluation feedback",
+    fillcolor="#fee2e2",
+    color="#dc2626"
+  ];
+  legend_control [
+    label="Blue = orchestration/control",
+    fillcolor="#e0f2fe",
+    color="#0284c7"
+  ];
+
+  { rank=same; legend_storage; legend_agents; legend_eval; legend_control; }
+}

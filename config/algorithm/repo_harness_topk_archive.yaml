@@ -1,0 +1,59 @@
+# @package _global_
+
+defaults:
+  - _base
+
+behavior_space:
+  _target_: gigaevo.config.helpers.build_behavior_space
+  keys:
+    - ${primary_key}
+  bounds:
+    - ${primary_bounds}
+  resolutions:
+    - ${primary_resolution}
+  binning_types:
+    - ${binning_type}
+  dynamic: true
+  expansion_buffer_ratio: 0.1
+
+required_behavior_keys:
+  _target_: gigaevo.config.helpers.extract_behavior_keys_from_behavior_space
+  island_configs: null
+  behavior_space: ${behavior_space}
+
+mutation_operator:
+  _target_: gigaevo.evolution.mutation.repo_harness_operator.RepoHarnessMutationOperator
+  source_repo: ${repo_harness.effective_source_repo}
+  backend: ${repo_harness.mutation_backend}
+  worktree_root: ${repo_harness.mutation_worktree_root}
+  log_root: ${repo_harness.mutation_log_root}
+  entrypoint: ${repo_harness.entrypoint}
+  branch_prefix: ${repo_harness.branch_prefix}
+  timeout: ${repo_harness.mutation_timeout}
+  smoke_commands: ${repo_harness.smoke_commands}
+  smoke_timeout: ${repo_harness.smoke_timeout}
+  smoke_shell: ${repo_harness.smoke_shell}
+  allow_no_changes: ${repo_harness.allow_no_changes}
+  keep_worktrees: ${repo_harness.keep_mutation_worktrees}
+  max_feedback_chars: ${repo_harness.max_feedback_chars}
+  max_parent_diff_chars: ${repo_harness.max_parent_diff_chars}
+  max_parent_reflection_chars: ${repo_harness.max_parent_reflection_chars}
+  allowed_changed_files: ${repo_harness.allowed_changed_files}
+  active_idea_path: ${repo_harness.active_idea_path}
+
+evolution_strategy:
+  _target_: gigaevo.evolution.strategies.repo_archive.RepoHarnessTopKArchiveStrategy
+  program_storage: ${ref:redis_storage}
+  behavior_space: ${behavior_space}
+  primary_key: ${primary_key}
+  higher_is_better: ${higher_is_better}
+  cell_size: ${repo_archive.cell_size}
+  redis_prefix: ${redis.prefix}:repo_topk_archive
+  novelty_threshold: ${repo_archive.novelty_threshold}
+  min_quality_floor: ${repo_archive.min_quality_floor}
+  regression_tolerance: ${repo_archive.regression_tolerance}
+  enable_quarantine: ${repo_archive.enable_quarantine}
+  hall_of_fame_size: ${repo_archive.hall_of_fame_size}
+  curation_interval: ${repo_archive.curation_interval}
+  stale_child_count_threshold: ${repo_archive.stale_child_count_threshold}
+  selection_temperature: ${repo_archive.selection_temperature}

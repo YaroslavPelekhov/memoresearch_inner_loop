@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - repo_harness
+  - override /pipeline: repo_harness_autoresearch
+  - override /parent_selector: repeat_single
+  - _self_
+
+# Greedy (1 + K) evolution:
+#   incumbent -> K parallel mutations -> best(incumbent, mutations)
+#
+# A single primary-metric cell makes archive replacement strict: a child must
+# improve the configured primary metric to replace the incumbent. Equal or
+# regressing children are discarded, so a stagnant generation retries from the
+# same best repository in the next generation.
+num_parents: 1
+max_elites_per_generation: 1
+max_mutations_per_generation: 4
+island_max_size: 1
+primary_resolution: 1
+enable_migration: false
+
+repo_harness:
+  # Autoresearch compares complete primary-fitness evaluations. Do not project
+  # a full score from the incumbent's failed-case subset.
+  staged_validation:
+    enabled: false

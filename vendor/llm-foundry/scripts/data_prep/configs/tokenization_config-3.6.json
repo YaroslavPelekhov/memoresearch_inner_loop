@@ -1,0 +1,52 @@
+{
+  "base_image": "-",
+  "base_input_path": "-",
+  "base_output_path": "-",
+  "tokenizer_path": "-",
+  "max_tokenized_len": 8192,
+  "n_gpus": 8,
+  "n_proc": 32,
+  "script_additional_params": "tokens_dtype=uint32",
+  "datasets": {
+    "arabic": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 2
+    },
+    "fineweb_edu_sharded": {
+      "script_path": "convert_dataset_parquet.py",
+      "per_file_task_split": false,
+      "num_executors": 1
+    },
+    "libgen_nougat_mathpix_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 2
+    },
+    "portuguese": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 8
+    },
+    "ru_cc_clear": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 8
+    },
+    "tribe_factoring_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 1
+    },
+    "tribe_medical_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 1
+    },
+    "uz_texts": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": false,
+      "num_executors": 1
+    }
+  }
+}

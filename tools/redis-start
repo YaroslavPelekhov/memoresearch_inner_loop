@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Start the host-local Redis required by the retained GigaEvo storage layer.
+
+set -euo pipefail
+
+redis_host="${AUTORESEARCH_REDIS_HOST:-127.0.0.1}"
+redis_port="${AUTORESEARCH_REDIS_PORT:-6379}"
+redis_dir="${AUTORESEARCH_REDIS_DIR:-${HOME}/.local/share/autoresearch-redis}"
+python_bin="${AUTORESEARCH_PYTHON:-python}"
+
+if ss -ltn | grep -q "${redis_host}:${redis_port}"; then
+    exit 0
+fi
+
+redis_server="${AUTORESEARCH_REDIS_SERVER:-}"
+if [[ -z "$redis_server" ]]; then
+    redis_server="$(command -v redis-server || true)"
+fi
+if [[ -z "$redis_server" ]]; then
+    redis_server="$($python_bin -c \
+        'from pathlib import Path; import redislite; print(Path(redislite.__file__).parent / "bin/redis-server")' \
+        2>/dev/null || true)"
+fi
+if [[ ! -x "$redis_server" ]]; then
+    echo "Redis server not found. Install redis-server or 'pip install redislite'." >&2
+    exit 2
+fi
+
+mkdir -p "$redis_dir"
+"$redis_server" \
+    --bind "$redis_host" \
+    --port "$redis_port" \
+    --daemonize yes \
+    --dir "$redis_dir" \
+    --dbfilename state.rdb \
+    --pidfile "$redis_dir/redis.pid" \
+    --logfile "$redis_dir/redis.log"
+
+for _ in {1..50}; do
+    if "$python_bin" -c \
+        "import redis; redis.Redis(host='$redis_host', port=$redis_port).ping()" \
+        >/dev/null 2>&1; then
+        exit 0
+    fi
+    sleep 0.1
+done
+
+echo "Redis did not become ready; see ${redis_dir}/redis.log" >&2
+exit 3

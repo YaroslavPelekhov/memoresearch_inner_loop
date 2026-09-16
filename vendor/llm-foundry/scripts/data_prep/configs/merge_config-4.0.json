@@ -1,0 +1,10 @@
+{
+    "base_dir": "-",
+    "one_level_dirs": [
+    ],
+    "two_level_dirs": [
+        "starcoder2_filtered_vocab_rarity",
+        "encc_no_urls"
+    ],
+    "three_level_dirs": []
+}

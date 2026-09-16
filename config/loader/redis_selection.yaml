@@ -1,0 +1,19 @@
+# @package _global_
+
+program_loader:
+  _target_: gigaevo.problems.initial_loaders.RedisTopProgramsLoader
+  source_host: ${redis.host}
+  source_port: ${redis.port}
+  source_db: ${loader.source_db}
+  key_prefix: ${loader.source_prefix}
+  metric_key: ${primary_key}
+  higher_is_better: ${higher_is_better}
+  top_n: ${loader.top_n}
+
+loader:
+  source_db: 0
+  # Source namespace to read top programs from. This intentionally defaults to
+  # the problem namespace so new experiment prefixes can seed from an existing
+  # run unless explicitly pointed at another source prefix.
+  source_prefix: ${problem.name}
+  top_n: 50

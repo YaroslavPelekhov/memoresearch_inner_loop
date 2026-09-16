@@ -1,0 +1,72 @@
+{
+  "base_image": "-",
+  "base_input_path": "-",
+  "base_output_path": "-",
+  "tokenizer_path": "-",
+  "max_tokenized_len": 8192,
+  "n_gpus": 8,
+  "n_proc": 32,
+  "script_additional_params": "tokens_dtype=uint32",
+  "datasets": {
+    "arxiv_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 2
+    },
+    "frw_filtered_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 4
+    },
+    "libgen_fiction_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 4
+    },
+    "libgen_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 4
+    },
+    "llemma_algebraic_stack_sharded": {
+      "script_path": "convert_dataset_hf_local.py",
+      "per_file_task_split": false,
+      "num_executors": 1
+    },
+    "llemma_open_web_math_sharded": {
+      "script_path": "convert_dataset_hf_local.py",
+      "per_file_task_split": false,
+      "num_executors": 2
+    },
+    "pubmed_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 4
+    },
+    "stackexchange_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 2
+    },
+    "tribe_juridicial_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 2
+    },
+    "tribe_musdigest_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 1
+    },
+    "wikipedia_sharded": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": true,
+      "num_executors": 4
+    },
+    "wikiquote": {
+      "script_path": "convert_dataset_json.py",
+      "per_file_task_split": false,
+      "num_executors": 1
+    }
+  }
+}

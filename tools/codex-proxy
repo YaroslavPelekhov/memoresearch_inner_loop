@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Run Codex through the project proxy without storing proxy credentials in Git.
+
+set -euo pipefail
+
+proxy_home="${AUTORESEARCH_PROXY_HOME:-${HOME}/.local/share/autoresearch-proxy}"
+codex_bin="${AUTORESEARCH_CODEX_BIN:-${HOME}/.local/bin/codex}"
+xray_bin="${proxy_home}/xray"
+xray_config="${proxy_home}/vless-mlpc.json"
+gost_bin="${proxy_home}/gost-linux-amd64-2.11.5"
+proxy_url="${AUTORESEARCH_CODEX_PROXY:-http://127.0.0.1:1081}"
+
+require_file() {
+    if [[ ! -e "$1" ]]; then
+        echo "Missing Codex proxy runtime asset: $1" >&2
+        exit 2
+    fi
+}
+
+require_file "$codex_bin"
+require_file "$xray_bin"
+require_file "$xray_config"
+require_file "$gost_bin"
+
+mkdir -p "$proxy_home"
+
+if ! ss -ltn | grep -q '127.0.0.1:1080'; then
+    nohup "$xray_bin" run -c "$xray_config" \
+        >>"${proxy_home}/xray.log" 2>&1 &
+fi
+
+for _ in {1..50}; do
+    ss -ltn | grep -q '127.0.0.1:1080' && break
+    sleep 0.1
+done
+if ! ss -ltn | grep -q '127.0.0.1:1080'; then
+    echo "Codex proxy SOCKS listener did not start; see ${proxy_home}/xray.log" >&2
+    exit 3
+fi
+
+if ! ss -ltn | grep -q '127.0.0.1:1081'; then
+    nohup "$gost_bin" -L http://127.0.0.1:1081 \
+        -F socks5://127.0.0.1:1080 >>"${proxy_home}/gost.log" 2>&1 &
+fi
+
+for _ in {1..50}; do
+    ss -ltn | grep -q '127.0.0.1:1081' && break
+    sleep 0.1
+done
+if ! ss -ltn | grep -q '127.0.0.1:1081'; then
+    echo "Codex HTTP proxy listener did not start; see ${proxy_home}/gost.log" >&2
+    exit 4
+fi
+
+export HTTP_PROXY="$proxy_url"
+export HTTPS_PROXY="$proxy_url"
+export http_proxy="$proxy_url"
+export https_proxy="$proxy_url"
+export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1}"
+export no_proxy="${no_proxy:-$NO_PROXY}"
+
+exec "$codex_bin" "$@"

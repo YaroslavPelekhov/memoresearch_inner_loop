@@ -1,0 +1,56 @@
+# @package _global_
+
+# Mutation-only autoresearch evaluation pipeline. The only agent invocation is
+# the coding-agent backend inside RepoHarnessMutationOperator. Benchmarking and
+# metric validation are deterministic stages; there is no reflection, insight,
+# lineage, memory, meta-selection, or archive-curation agent.
+dag_blueprint:
+  _target_: gigaevo.runner.dag_blueprint.DAGBlueprint
+  _convert_: all
+  nodes:
+    RepoBenchmarkStage:
+      _target_: gigaevo.programs.stages.repo_benchmark.RepoBenchmarkStage
+      _partial_: true
+      source_repo: ${repo_harness.effective_source_repo}
+      benchmark_command: ${repo_harness.benchmark_command}
+      storage: ${ref:redis_storage}
+      worktree_root: ${repo_harness.eval_worktree_root}
+      metrics_path: ${repo_harness.metrics_path}
+      stdout_json: ${repo_harness.stdout_json}
+      shell: ${repo_harness.benchmark_shell}
+      benchmark_timeout: ${repo_harness.benchmark_timeout}
+      env: ${repo_harness.benchmark_env}
+      structured_feedback_path: ${repo_harness.structured_feedback_path}
+      structured_feedback_markers: ${repo_harness.structured_feedback_markers}
+      artifact_root: ${repo_harness.eval_artifact_root}
+      capture_artifacts: ${repo_harness.capture_eval_artifacts}
+      max_artifact_files: ${repo_harness.max_artifact_files}
+      max_artifact_file_bytes: ${repo_harness.max_artifact_file_bytes}
+      max_artifact_total_bytes: ${repo_harness.max_artifact_total_bytes}
+      fail_on_nonzero: ${repo_harness.fail_on_nonzero}
+      keep_worktrees: ${repo_harness.keep_eval_worktrees}
+      feedback_tail_chars: ${repo_harness.feedback_tail_chars}
+      staged_validation_enabled: false
+      staged_primary_metric: ${repo_harness.staged_validation.primary_metric}
+      staged_case_arg_names: ${repo_harness.staged_validation.case_arg_names}
+      staged_case_joiner: ${repo_harness.staged_validation.case_joiner}
+      staged_case_failure_threshold: ${repo_harness.staged_validation.case_failure_threshold}
+      staged_min_improvement: ${repo_harness.staged_validation.min_improvement}
+      staged_max_cases: ${repo_harness.staged_validation.max_cases}
+      timeout: ${stage_timeout}
+
+    EnsureMetricsStage:
+      _target_: gigaevo.programs.stages.metrics.EnsureMetricsStage
+      _partial_: true
+      metrics_factory: ${ref:metrics_context::get_sentinels}
+      metrics_context: ${metrics_context}
+      timeout: ${stage_timeout}
+
+  data_flow_edges:
+    - source_stage: RepoBenchmarkStage
+      destination_stage: EnsureMetricsStage
+      input_name: candidate
+
+  exec_order_deps: {}
+  max_parallel_stages: ${dag_concurrency}
+  dag_timeout: ${dag_timeout}

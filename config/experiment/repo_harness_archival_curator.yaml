@@ -1,0 +1,31 @@
+# @package _global_
+
+defaults:
+  - repo_harness
+  - override /algorithm: repo_harness_archival_curator
+  - _self_
+
+# A Codex curator chooses the active repo portfolio once per completed
+# generation. The underlying ProgramStorage remains immutable history.
+archival_curator:
+  capacity: 10
+  max_prompt_tokens: 200000
+  prompt_token_encoding: o200k_base
+  max_diff_chars: 12000
+  max_reflection_chars: 6000
+  max_raw_feedback_chars: 10000
+  protect_champion: true
+  enable_quarantine: false
+  fail_open: true
+
+# Expose the complete curated archive to MetaRepoParentSelector. The selector
+# then makes the separate, short-horizon decision about which parents to use.
+max_elites_per_generation: ${archival_curator.capacity}
+
+parent_selector:
+  max_candidate_count: ${archival_curator.capacity}
+
+# Lower-fitness children may contain unique capabilities or useful ideas, so
+# ensure they receive the same reflection context as improving children.
+repo_harness:
+  reflection_skip_clear_regressions: false

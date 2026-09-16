@@ -1,0 +1,103 @@
+# @package _global_
+
+evolution_context:
+  _target_: gigaevo.entrypoint.evolution_context.EvolutionContext
+  problem_ctx: ${problem_context}
+  llm_wrapper: ${ref:llm}
+  storage: ${ref:redis_storage}
+  prompts_dir: ${prompts.dir}
+  prompt_fetcher: ${prompt_fetcher}
+  memory_provider: ${memory_provider}
+
+dag_blueprint:
+  _target_: gigaevo.runner.dag_blueprint.DAGBlueprint
+  _convert_: all
+  nodes:
+    RepoBenchmarkStage:
+      _target_: gigaevo.programs.stages.repo_benchmark.RepoBenchmarkStage
+      _partial_: true
+      source_repo: ${repo_harness.effective_source_repo}
+      benchmark_command: ${repo_harness.benchmark_command}
+      storage: ${ref:redis_storage}
+      worktree_root: ${repo_harness.eval_worktree_root}
+      metrics_path: ${repo_harness.metrics_path}
+      stdout_json: ${repo_harness.stdout_json}
+      shell: ${repo_harness.benchmark_shell}
+      benchmark_timeout: ${repo_harness.benchmark_timeout}
+      env: ${repo_harness.benchmark_env}
+      structured_feedback_path: ${repo_harness.structured_feedback_path}
+      structured_feedback_markers: ${repo_harness.structured_feedback_markers}
+      artifact_root: ${repo_harness.eval_artifact_root}
+      capture_artifacts: ${repo_harness.capture_eval_artifacts}
+      max_artifact_files: ${repo_harness.max_artifact_files}
+      max_artifact_file_bytes: ${repo_harness.max_artifact_file_bytes}
+      max_artifact_total_bytes: ${repo_harness.max_artifact_total_bytes}
+      fail_on_nonzero: ${repo_harness.fail_on_nonzero}
+      keep_worktrees: ${repo_harness.keep_eval_worktrees}
+      feedback_tail_chars: ${repo_harness.feedback_tail_chars}
+      staged_validation_enabled: ${repo_harness.staged_validation.enabled}
+      staged_primary_metric: ${repo_harness.staged_validation.primary_metric}
+      staged_case_arg_names: ${repo_harness.staged_validation.case_arg_names}
+      staged_case_joiner: ${repo_harness.staged_validation.case_joiner}
+      staged_case_failure_threshold: ${repo_harness.staged_validation.case_failure_threshold}
+      staged_min_improvement: ${repo_harness.staged_validation.min_improvement}
+      staged_max_cases: ${repo_harness.staged_validation.max_cases}
+      timeout: ${stage_timeout}
+
+    EnsureMetricsStage:
+      _target_: gigaevo.programs.stages.metrics.EnsureMetricsStage
+      _partial_: true
+      metrics_factory: ${ref:metrics_context::get_sentinels}
+      metrics_context: ${metrics_context}
+      timeout: ${stage_timeout}
+
+    RepoReflectionStage:
+      _target_: gigaevo.programs.stages.repo_reflection.RepoReflectionStage
+      _partial_: true
+      llm: ${ref:llm}
+      storage: ${ref:redis_storage}
+      task_description: ${ref:problem_context::task_description}
+      metrics_context: ${metrics_context}
+      max_diff_chars: ${repo_harness.reflection_max_diff_chars}
+      max_feedback_chars: ${repo_harness.reflection_max_feedback_chars}
+      max_prompt_tokens: ${repo_harness.reflection_max_prompt_tokens}
+      prompt_token_encoding: ${repo_harness.reflection_prompt_token_encoding}
+      max_trace_excerpt_chars: ${repo_harness.reflection_max_trace_excerpt_chars}
+      fail_open: ${repo_harness.reflection_fail_open}
+      skip_llm_for_clear_regressions: ${repo_harness.reflection_skip_clear_regressions}
+      skip_llm_for_invalid: ${repo_harness.reflection_skip_invalid}
+      regression_skip_tolerance: ${repo_harness.reflection_regression_skip_tolerance}
+      timeout: ${stage_timeout}
+
+    MutationContextStage:
+      _target_: gigaevo.programs.stages.mutation_context.MutationContextStage
+      _partial_: true
+      metrics_context: ${metrics_context}
+      timeout: ${stage_timeout}
+
+  data_flow_edges:
+    - source_stage: RepoBenchmarkStage
+      destination_stage: EnsureMetricsStage
+      input_name: candidate
+    - source_stage: EnsureMetricsStage
+      destination_stage: RepoReflectionStage
+      input_name: metrics
+    - source_stage: EnsureMetricsStage
+      destination_stage: MutationContextStage
+      input_name: metrics
+    - source_stage: RepoReflectionStage
+      destination_stage: MutationContextStage
+      input_name: formatted
+
+  exec_order_deps:
+    RepoReflectionStage:
+      - _target_: gigaevo.programs.dag.automata.ExecutionOrderDependency
+        stage_name: EnsureMetricsStage
+        condition: success
+    MutationContextStage:
+      - _target_: gigaevo.programs.dag.automata.ExecutionOrderDependency
+        stage_name: RepoReflectionStage
+        condition: success
+
+  max_parallel_stages: ${dag_concurrency}
+  dag_timeout: ${dag_timeout}

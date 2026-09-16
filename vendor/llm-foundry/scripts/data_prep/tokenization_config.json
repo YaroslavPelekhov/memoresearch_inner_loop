@@ -1,0 +1,22 @@
+{
+  "base_image": "image_name_or_path",
+  "base_input_path": "/path/to/datasets/source/directory",
+  "base_output_path": "/path/to/datasets/tokenized/directory",
+  "tokenizer_path": "/path/to/tokenizer",
+  "max_tokenized_len": 8192,
+  "n_gpus": 1,
+  "n_proc": 32,
+  "script_additional_params": "tokens_dtype=uint32",
+  "datasets": {
+    "dataset1": {
+      "script_path": "/path/to/script1.py",
+      "per_file_task_split": true,
+      "num_executors": 1
+    },
+    "dataset2": {
+      "script_path": "convert_script2.py",
+      "per_file_task_split": false,
+      "num_executors": 1
+    }
+  }
+}

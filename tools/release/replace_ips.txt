@@ -1,0 +1,8 @@
+# IP sanitization rules for git-filter-repo --replace-text
+# Format: literal==>replacement  OR  regex:pattern==>replacement
+
+# Replace internal LiteLLM proxy URLs
+regex:http://10\.232\.[0-9]+\.[0-9]+:[0-9]+/v1==>http://localhost:8000/v1
+
+# Replace any remaining bare internal IPs
+regex:10\.232\.[0-9]+\.[0-9]+==>INTERNAL_IP
