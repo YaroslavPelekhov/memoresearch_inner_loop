@@ -91,6 +91,7 @@ session_name="yaroslav-mf-gpu${gpu_index}"
 required_paths=(
     "$AUTORESEARCH_PYTHON"
     "$AUTORESEARCH_CODEX_BIN"
+    "$CODEX_HOME/auth.json"
     "$AUTORESEARCH_PROXY_HOME/xray"
     "$AUTORESEARCH_PROXY_HOME/vless-mlpc.json"
     "$AUTORESEARCH_PROXY_HOME/gost-linux-amd64-2.11.5"
@@ -112,9 +113,8 @@ if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
     echo "Refusing to use a dirty source checkout: $repo_root" >&2
     exit 4
 fi
-if ! CODEX_HOME="$CODEX_HOME" "$AUTORESEARCH_CODEX_BIN" login status \
-    2>&1 | grep -q 'Logged in'; then
-    echo "Codex authentication is unavailable in $CODEX_HOME" >&2
+if ! timeout 10 "$AUTORESEARCH_CODEX_BIN" --version >/dev/null; then
+    echo "Codex runtime is unavailable: $AUTORESEARCH_CODEX_BIN" >&2
     exit 5
 fi
 
