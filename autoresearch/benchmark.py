@@ -482,6 +482,17 @@ def _apply_screen_contract(
     config = OmegaConf.load(config_path)
     if "eval_loader" not in config:
         raise ValueError("screening requires eval_loader")
+    train_streams = config.get("train_loader", {}).get("dataset", {}).get("streams")
+    eval_streams = config.get("eval_loader", {}).get("dataset", {}).get("streams")
+    if not OmegaConf.is_dict(train_streams) or len(train_streams) != 1:
+        raise ValueError("screening requires exactly one training stream")
+    if not OmegaConf.is_dict(eval_streams) or len(eval_streams) != 1:
+        raise ValueError("screening requires exactly one validation stream")
+    train_stream = next(iter(train_streams.values()))
+    eval_stream = next(iter(eval_streams.values()))
+    screen_root = str(eval_stream["local"])
+    train_stream["local"] = screen_root
+    train_stream["split"] = "train"
     interval = max(1, batches // 4)
     config.max_duration = f"{batches}ba"
     config.eval_interval = f"{interval}ba"
@@ -498,6 +509,9 @@ def _apply_screen_contract(
         "evaluation_interval_batches": interval,
         "evaluation_subset_batches": eval_batches,
         "expected_evaluations": math.ceil(batches / interval),
+        "training_root": screen_root,
+        "training_split": "train",
+        "validation_split": str(eval_stream["split"]),
     }
 
 

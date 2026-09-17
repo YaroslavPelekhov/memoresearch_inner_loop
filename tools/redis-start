@@ -19,7 +19,8 @@ listener_is_ours() {
     local pid
     pid="$(tr -cd '0-9' <"$pidfile")"
     [[ -n "$pid" && -r "/proc/${pid}/cmdline" ]] || return 1
-    tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -Fq -- "$redis_dir" || return 1
+    [[ "$(readlink -f "/proc/${pid}/cwd")" == "$(realpath "$redis_dir")" ]] \
+        || return 1
     ss -H -ltnp 2>/dev/null | grep -E "[:.]${redis_port}[[:space:]].*pid=${pid}," >/dev/null
 }
 

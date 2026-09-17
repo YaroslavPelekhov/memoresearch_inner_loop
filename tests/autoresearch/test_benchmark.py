@@ -101,7 +101,15 @@ def test_screen_contract_has_exactly_four_heldout_evaluations(tmp_path: Path) ->
         "eval_before_train: skip\n"
         "eval_subset_num_batches: -1\n"
         "console_log_interval: 20ba\n"
-        "eval_loader: {name: text}\n"
+        "train_loader:\n"
+        "  dataset:\n"
+        "    streams:\n"
+        "      source: {local: /corpus, split: original}\n"
+        "eval_loader:\n"
+        "  name: text\n"
+        "  dataset:\n"
+        "    streams:\n"
+        "      heldout: {local: /heldout, split: validation}\n"
         "eval_gauntlet: {weighting: EQUAL}\n"
         "icl_tasks: [{label: core}]\n",
         encoding="utf-8",
@@ -115,10 +123,15 @@ def test_screen_contract_has_exactly_four_heldout_evaluations(tmp_path: Path) ->
         "evaluation_interval_batches": 256,
         "evaluation_subset_batches": 32,
         "expected_evaluations": 4,
+        "training_root": "/heldout",
+        "training_split": "train",
+        "validation_split": "validation",
     }
     rendered = config.read_text(encoding="utf-8")
     assert "max_duration: 1024ba" in rendered
     assert "eval_interval: 256ba" in rendered
+    assert "local: /heldout" in rendered
+    assert "split: train" in rendered
     assert "icl_tasks" not in rendered
     assert "eval_gauntlet" not in rendered
 
