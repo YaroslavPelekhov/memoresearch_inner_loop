@@ -122,9 +122,15 @@ assert_port_private() {
     fi
     local pid
     pid="$(tr -cd '0-9' <"$pidfile")"
-    if [[ -z "$pid" || ! -r "/proc/${pid}/cmdline" ]] \
-        || ! tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -Fq -- "$owner_root" \
-        || [[ "$listener" != *"pid=${pid},"* ]]; then
+    local owned_process=false
+    if [[ -n "$pid" && -r "/proc/${pid}/cmdline" ]]; then
+        if tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -Fq -- "$owner_root"; then
+            owned_process=true
+        elif [[ "$(readlink -f "/proc/${pid}/cwd")" == "$(realpath "$owner_root")" ]]; then
+            owned_process=true
+        fi
+    fi
+    if [[ "$owned_process" != true || "$listener" != *"pid=${pid},"* ]]; then
         echo "$label port is occupied by a process outside $owner_root: ${host}:${port}" >&2
         exit 8
     fi
