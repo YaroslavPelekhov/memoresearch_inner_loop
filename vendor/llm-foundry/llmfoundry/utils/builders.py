@@ -380,6 +380,12 @@ def build_optimizer(
     name: str,
     optimizer_config: dict[str, Any],
 ) -> Optimizer:
+    # Optimizers retain values such as ``betas`` in their parameter groups.
+    # Passing OmegaConf containers through here therefore leaks ListConfig
+    # instances into the optimizer state dict, which public PyTorch's
+    # distributed checkpoint traversal cannot serialize.  Materialize a plain
+    # Python tree before the config becomes long-lived optimizer state.
+    optimizer_config = to_dict_container(optimizer_config)
     params = _extract_param_groups(model, optimizer_config)
     kwargs = {**optimizer_config}
 
@@ -426,7 +432,11 @@ def build_scheduler(
             in order (excluding the default param group). Required when using
             ``param_str_match`` in scheduler ``param_groups``.
     """
-    cfg = cfg.copy()
+    # Scheduler implementations may retain their constructor arguments and
+    # Composer includes scheduler state in full checkpoints.  Keep OmegaConf
+    # containers out of that state for compatibility with public PyTorch's
+    # distributed checkpoint traversal.
+    cfg = to_dict_container(cfg)
 
     param_groups_cfg = cfg.pop("param_groups", None)
     if not param_groups_cfg:
@@ -441,12 +451,12 @@ def build_scheduler(
     if scheduler_cls is None:
         raise ValueError(f"Not sure how to build scheduler: {scheduler_name}")
 
-    default_kwargs = om.to_container(cfg, resolve=True)
+    default_kwargs = dict(cfg)
     default_scheduler = scheduler_cls(**default_kwargs)
 
     per_group_schedulers: dict[int, Any] = {}
     for raw_entry in param_groups_cfg:
-        entry = om.to_container(raw_entry, resolve=True)
+        entry = dict(raw_entry) if isinstance(raw_entry, dict) else raw_entry
         if not isinstance(entry, dict):
             raise TypeError(
                 "Each scheduler `param_groups` entry must be a mapping, "
