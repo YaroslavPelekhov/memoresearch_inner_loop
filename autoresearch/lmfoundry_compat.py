@@ -9,8 +9,12 @@ unsupported private-only features fail explicitly if a config requests them.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+import fcntl
+import os
 import sys
+from contextlib import nullcontext
+from functools import wraps
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -54,6 +58,49 @@ class _GigaTimer:
     @classmethod
     def set_interval(cls, interval: int) -> None:
         cls.interval = interval
+
+
+def _install_streaming_prefix_lock() -> None:
+    """Make Mosaic Streaming's shared-memory prefix allocation atomic.
+
+    Mosaic Streaming discovers a free numeric shared-memory prefix and creates
+    it in separate steps. Independent single-GPU jobs can consequently select
+    the same prefix and one fails with ``FileExistsError``. The Euler pilot
+    opts into a filesystem lock shared only by our isolated runtime.
+    """
+
+    if os.environ.get("AUTORESEARCH_SERIALIZE_STREAMING_PREFIX") != "1":
+        return
+
+    import streaming.base.dataset as streaming_dataset
+    import streaming.base.shared.prefix as streaming_prefix
+
+    original = streaming_prefix.get_shm_prefix
+    if getattr(original, "_autoresearch_locked", False):
+        return
+
+    configured_path = os.environ.get("AUTORESEARCH_STREAMING_SHM_LOCK")
+    if not configured_path:
+        raise RuntimeError(
+            "AUTORESEARCH_STREAMING_SHM_LOCK is required when shared-memory "
+            "prefix serialization is enabled"
+        )
+    lock_path = Path(configured_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    @wraps(original)
+    def locked_get_shm_prefix(*args: Any, **kwargs: Any):
+        with lock_path.open("a+b") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                return original(*args, **kwargs)
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    locked_get_shm_prefix._autoresearch_locked = True  # type: ignore[attr-defined]
+    streaming_prefix.get_shm_prefix = locked_get_shm_prefix
+    # StreamingDataset imports the function into its module namespace.
+    streaming_dataset.get_shm_prefix = locked_get_shm_prefix
 
 
 def install() -> None:
@@ -161,3 +208,5 @@ def install() -> None:
         dist.run_local_rank_zero_first = nullcontext  # type: ignore[attr-defined]
     if not hasattr(dist, "is_trivial_process_group"):
         dist.is_trivial_process_group = lambda _group=None: True  # type: ignore[attr-defined]
+
+    _install_streaming_prefix_lock()
