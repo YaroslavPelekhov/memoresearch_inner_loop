@@ -89,6 +89,10 @@ log_path="$workspace_root/logs/${campaign_name}.log"
 session_name="yaroslav-mf-gpu${gpu_index}"
 tmux_socket="${AUTORESEARCH_TMUX_SOCKET:-$workspace_root/runtime/tmux.sock}"
 streaming_prefix_base=$((700000 + gpu_index * 100000))
+lane_data_root="${AUTORESEARCH_LANE_DATA_ROOT:-$workspace_root/data-lanes}/gpu${gpu_index}"
+lane_mds_path="$lane_data_root/$(basename "$DCLM_MDS_PATH")"
+lane_screen_mds_path="$lane_data_root/$(basename "$DCLM_SCREEN_MDS_PATH")"
+lane_eval_cache_path="$lane_data_root/eval-cache"
 
 required_paths=(
     "$AUTORESEARCH_PYTHON"
@@ -104,6 +108,10 @@ required_paths=(
     "$DCLM_SCREEN_MDS_PATH/validation/index.json"
     "$DCLM_CORE_PATH"
     "$AUTORESEARCH_MULTIFIDELITY_PLAN"
+    "$lane_mds_path/corpus-manifest.json"
+    "$lane_screen_mds_path/corpus-manifest.json"
+    "$lane_screen_mds_path/holdout-split-manifest.json"
+    "$lane_screen_mds_path/validation/index.json"
 )
 for path in "${required_paths[@]}"; do
     if [[ ! -e "$path" ]]; then
@@ -204,6 +212,7 @@ commit="$(git -C "$repo_root" rev-parse HEAD)"
 echo "ready: gpu=$gpu_index commit=$commit campaign=$campaign_root"
 echo "resources: memory_used=${memory_used}MiB utilization=${utilization}%"
 echo "streaming: prefix_range=${streaming_prefix_base}-$((streaming_prefix_base + 99999))"
+echo "data: train=$lane_mds_path screen=$lane_screen_mds_path"
 if [[ "$start" != true ]]; then
     echo "validation only; add --start to launch $session_name"
     exit 0
@@ -217,7 +226,8 @@ mkdir -p \
     "$XDG_CONFIG_HOME" \
     "$XDG_DATA_HOME" \
     "$TMPDIR" \
-    "$AUTORESEARCH_REDIS_DIR"
-launch_command="cd '$repo_root' && source '$runtime_env' && export CUDA_VISIBLE_DEVICES='$gpu_index' AUTORESEARCH_CAMPAIGN_ROOT='$campaign_root' AUTORESEARCH_STREAMING_PREFIX_BASE='$streaming_prefix_base' && '$repo_root/tools/redis-start' && exec '$AUTORESEARCH_PYTHON' -u tools/run-idea-campaign-supervised.py --campaign-root '$campaign_root' --target-rounds '$target_rounds' --model '$CODEX_MODEL' --evolution-generations '$evolution_generations' >>'$log_path' 2>&1"
+    "$AUTORESEARCH_REDIS_DIR" \
+    "$lane_eval_cache_path"
+launch_command="cd '$repo_root' && source '$runtime_env' && export CUDA_VISIBLE_DEVICES='$gpu_index' AUTORESEARCH_CAMPAIGN_ROOT='$campaign_root' AUTORESEARCH_STREAMING_PREFIX_BASE='$streaming_prefix_base' DCLM_MDS_PATH='$lane_mds_path' DCLM_SCREEN_MDS_PATH='$lane_screen_mds_path' DCLM_EVAL_CACHE_PATH='$lane_eval_cache_path' && '$repo_root/tools/redis-start' && exec '$AUTORESEARCH_PYTHON' -u tools/run-idea-campaign-supervised.py --campaign-root '$campaign_root' --target-rounds '$target_rounds' --model '$CODEX_MODEL' --evolution-generations '$evolution_generations' >>'$log_path' 2>&1"
 tmux -S "$tmux_socket" new-session -d -s "$session_name" "$launch_command"
 echo "started: tmux=$session_name log=$log_path"

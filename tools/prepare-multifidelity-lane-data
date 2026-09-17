@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Build per-GPU hardlink views so Mosaic Streaming raw caches cannot collide.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+workspace_root="${AUTORESEARCH_WORKSPACE_ROOT:-$(dirname "$repo_root")}"
+runtime_env="${AUTORESEARCH_RUNTIME_ENV:-$repo_root/config/server/euler-yaroslav-multifidelity.env}"
+gpu_index=""
+
+usage() {
+    echo "Usage: tools/prepare-multifidelity-lane-data --gpu 0|1 [--runtime-env PATH]"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --gpu)
+            gpu_index="$2"
+            shift 2
+            ;;
+        --runtime-env)
+            runtime_env="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ "$gpu_index" != "0" && "$gpu_index" != "1" ]]; then
+    echo "--gpu must be 0 or 1" >&2
+    exit 2
+fi
+if [[ ! -f "$runtime_env" ]]; then
+    echo "Missing runtime environment: $runtime_env" >&2
+    exit 3
+fi
+
+# shellcheck disable=SC1090
+source "$runtime_env"
+workspace_root="${AUTORESEARCH_WORKSPACE_ROOT:-$workspace_root}"
+lane_root="${AUTORESEARCH_LANE_DATA_ROOT:-$workspace_root/data-lanes}/gpu${gpu_index}"
+mkdir -p "$lane_root"
+
+prepare_dataset() {
+    local source_path="$1"
+    local target_path="$lane_root/$(basename "$source_path")"
+    if [[ -d "$target_path" ]]; then
+        echo "exists: $target_path"
+        return
+    fi
+    if [[ ! -d "$source_path" ]]; then
+        echo "Missing source dataset: $source_path" >&2
+        exit 3
+    fi
+
+    local staging_path
+    staging_path="$(mktemp -d "$lane_root/.prepare-$(basename "$source_path").XXXXXX")"
+    cp -al -- "$source_path/." "$staging_path/"
+    # Raw shards and interrupted decompression files are derived caches. Leave
+    # only immutable indexes/manifests/compressed shards in the new lane view.
+    find "$staging_path" -type f \( -name '*.mds' -o -name '*.tmp' \) -delete
+    mv -- "$staging_path" "$target_path"
+    echo "prepared: $target_path"
+}
+
+prepare_dataset "$DCLM_MDS_PATH"
+prepare_dataset "$DCLM_SCREEN_MDS_PATH"
+mkdir -p "$lane_root/eval-cache"
+echo "ready: gpu=$gpu_index lane_data=$lane_root"

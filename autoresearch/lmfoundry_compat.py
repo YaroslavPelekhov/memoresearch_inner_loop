@@ -9,15 +9,14 @@ unsupported private-only features fail explicitly if a config requests them.
 
 from __future__ import annotations
 
-import fcntl
-import os
-import sys
 from contextlib import nullcontext
+import fcntl
 from functools import wraps
+import os
 from pathlib import Path
+import sys
 from types import ModuleType
 from typing import Any
-
 
 _STREAMING_PREFIX_LIMIT = 1_000_000
 _STREAMING_PREFIX_RANGE_SIZE = 100_000

@@ -18,6 +18,9 @@ Mosaic Streaming shared memory is isolated by lane as well: GPU 0 allocates
 numeric prefixes from `700000..799999`, and GPU 1 from `800000..899999`.
 This avoids the global low-prefix namespace used by unrelated jobs under the
 shared account; a private filesystem lock still serializes our own allocation.
+Its derived raw-shard and evaluation caches are also isolated under
+`data-lanes/gpu0` and `data-lanes/gpu1`. The immutable compressed shards are
+hardlinked, so the lane views do not duplicate the source corpus blocks.
 
 Connect through the shared-account isolation wrapper:
 
@@ -34,6 +37,8 @@ that remain in the administrator-provided guest history file.
 Validate both lanes without starting them:
 
 ```bash
+tools/prepare-multifidelity-lane-data --gpu 0
+tools/prepare-multifidelity-lane-data --gpu 1
 tools/launch-multifidelity-pilot --gpu 0
 tools/launch-multifidelity-pilot --gpu 1
 ```
