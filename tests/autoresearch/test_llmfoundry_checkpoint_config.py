@@ -6,9 +6,15 @@ from pathlib import Path
 from omegaconf import DictConfig, ListConfig, OmegaConf
 import pytest
 
+from autoresearch.lmfoundry_compat import install as install_lmfoundry_compat
 
-pytest.importorskip("composer")
 torch = pytest.importorskip("torch")
+try:
+    install_lmfoundry_compat()
+except ModuleNotFoundError as exc:
+    if exc.name == "composer" or (exc.name or "").startswith("composer."):
+        pytest.skip("Composer is not installed", allow_module_level=True)
+    raise
 
 VENDORED_LLM_FOUNDRY = Path(__file__).parents[2] / "vendor" / "llm-foundry"
 sys.path.insert(0, str(VENDORED_LLM_FOUNDRY))
