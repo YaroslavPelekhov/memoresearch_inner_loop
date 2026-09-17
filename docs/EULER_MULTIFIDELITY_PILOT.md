@@ -14,6 +14,11 @@ The pilot uses `runtime/tmux.sock` instead of the shared user's default tmux
 socket. XDG, HuggingFace, Torch, Triton, CUDA, pip, Matplotlib, and temporary
 file locations are also redirected below the isolated workspace.
 
+Mosaic Streaming shared memory is isolated by lane as well: GPU 0 allocates
+numeric prefixes from `700000..799999`, and GPU 1 from `800000..899999`.
+This avoids the global low-prefix namespace used by unrelated jobs under the
+shared account; a private filesystem lock still serializes our own allocation.
+
 Connect through the shared-account isolation wrapper:
 
 ```bash

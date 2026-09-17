@@ -19,6 +19,21 @@ from types import ModuleType
 from typing import Any
 
 
+_STREAMING_PREFIX_LIMIT = 1_000_000
+_STREAMING_PREFIX_RANGE_SIZE = 100_000
+
+
+def _streaming_prefix_candidates(base: int):
+    """Yield one private lane's valid Mosaic Streaming prefix range."""
+
+    if not 0 <= base < _STREAMING_PREFIX_LIMIT:
+        raise ValueError(
+            "AUTORESEARCH_STREAMING_PREFIX_BASE must be between 0 and 999999"
+        )
+    stop = min(base + _STREAMING_PREFIX_RANGE_SIZE, _STREAMING_PREFIX_LIMIT)
+    yield from range(base, stop)
+
+
 class _UnavailablePrivateFeature:
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError(
@@ -61,12 +76,13 @@ class _GigaTimer:
 
 
 def _install_streaming_prefix_lock() -> None:
-    """Make Mosaic Streaming's shared-memory prefix allocation atomic.
+    """Isolate and serialize Mosaic Streaming shared-memory allocation.
 
     Mosaic Streaming discovers a free numeric shared-memory prefix and creates
     it in separate steps. Independent single-GPU jobs can consequently select
-    the same prefix and one fails with ``FileExistsError``. The Euler pilot
-    opts into a filesystem lock shared only by our isolated runtime.
+    the same prefix and one fails with ``FileExistsError``. A lane-specific
+    range prevents collisions with unrelated shared-account jobs, while the
+    filesystem lock makes allocation atomic among our own lanes.
     """
 
     if os.environ.get("AUTORESEARCH_SERIALIZE_STREAMING_PREFIX") != "1":
@@ -74,6 +90,23 @@ def _install_streaming_prefix_lock() -> None:
 
     import streaming.base.dataset as streaming_dataset
     import streaming.base.shared.prefix as streaming_prefix
+
+    configured_base = os.environ.get("AUTORESEARCH_STREAMING_PREFIX_BASE")
+    if configured_base:
+        try:
+            prefix_base = int(configured_base)
+            # Validate eagerly instead of failing after a training job starts.
+            next(_streaming_prefix_candidates(prefix_base))
+        except (TypeError, ValueError, StopIteration) as exc:
+            raise RuntimeError(
+                "AUTORESEARCH_STREAMING_PREFIX_BASE must select a non-empty "
+                "range between 0 and 999999"
+            ) from exc
+
+        def lane_prefixes():
+            yield from _streaming_prefix_candidates(prefix_base)
+
+        streaming_prefix._each_prefix_int = lane_prefixes
 
     original = streaming_prefix.get_shm_prefix
     if getattr(original, "_autoresearch_locked", False):
