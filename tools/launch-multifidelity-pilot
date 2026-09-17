@@ -91,6 +91,7 @@ tmux_socket="${AUTORESEARCH_TMUX_SOCKET:-$workspace_root/runtime/tmux.sock}"
 
 required_paths=(
     "$AUTORESEARCH_PYTHON"
+    "$LLMFOUNDRY_TORCHRUN"
     "$AUTORESEARCH_CODEX_BIN"
     "$CODEX_HOME/auth.json"
     "$AUTORESEARCH_PROXY_HOME/xray"
