@@ -281,7 +281,34 @@ def main() -> int:
         probe_metrics: dict[str, Any] | None = None
         probe_feedback: dict[str, Any] = {}
         probe_fitness: float | None = None
+        control_metrics: dict[str, Any] | None = None
+        control_feedback: dict[str, Any] = {}
+        control_fitness: float | None = None
         if rung.probe_batches:
+            if plan.matched_control_probes:
+                control_dir = run_dir / "controls" / f"budget-{rung.budget_batches}"
+                control_metrics, control_feedback = _run_benchmark(
+                    label=f"control-{rung.budget_batches}",
+                    run_dir=control_dir,
+                    benchmark_args=benchmark_args,
+                    extra_args=[
+                        "--screen-batches",
+                        str(rung.budget_batches + rung.probe_batches),
+                        "--screen-eval-batches",
+                        str(args.screen_eval_batches),
+                        "--schedule-reference-batches",
+                        str(plan.schedule_reference_batches),
+                        "--load-path",
+                        str(checkpoint),
+                    ],
+                )
+                if _checkpoint_sha256(checkpoint) != checkpoint_hash:
+                    raise RuntimeError(
+                        "matched control modified the main-branch checkpoint"
+                    )
+                if _valid(control_metrics):
+                    control_fitness = _fitness(control_metrics)
+
             probe_dir = run_dir / "probes" / f"budget-{rung.budget_batches}"
             probe_metrics, probe_feedback = _run_benchmark(
                 label=f"probe-{rung.budget_batches}",
@@ -312,6 +339,7 @@ def main() -> int:
             previous_main_fitness=previous_main_fitness,
             probe_fitness=probe_fitness,
             previous_probe_fitness=previous_probe_fitness,
+            control_fitness=control_fitness,
         )
         estimate = (
             probability_model.predict(rung.budget_batches, features)
@@ -333,6 +361,11 @@ def main() -> int:
             probe_metrics=(
                 _finite_metrics(probe_metrics) if probe_metrics is not None else None
             ),
+            control_metrics=(
+                _finite_metrics(control_metrics)
+                if control_metrics is not None
+                else None
+            ),
             features=features,
             probability=estimate,
             decision=decision,
@@ -344,9 +377,16 @@ def main() -> int:
                 "main_feedback": main_feedback,
                 "probe_feedback": probe_feedback,
                 "probe_is_valid": probe_fitness is not None,
+                "control_feedback": control_feedback,
+                "control_is_valid": control_fitness is not None,
                 "probe_wall_time_seconds": (
                     float(probe_metrics.get("wall_time_seconds", 0.0))
                     if probe_metrics is not None
+                    else 0.0
+                ),
+                "control_wall_time_seconds": (
+                    float(control_metrics.get("wall_time_seconds", 0.0))
+                    if control_metrics is not None
                     else 0.0
                 ),
             },

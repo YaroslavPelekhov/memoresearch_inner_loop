@@ -10,6 +10,7 @@ gpu_index=""
 campaign_name=""
 target_rounds="${AUTORESEARCH_PILOT_TARGET_ROUNDS:-4}"
 evolution_generations="${AUTORESEARCH_PILOT_EVOLUTION_GENERATIONS:-4}"
+multifidelity_plan=""
 start=false
 
 usage() {
@@ -21,6 +22,7 @@ Options:
   --target-rounds N        Default: 4
   --evolution-generations N  Default: 4
   --runtime-env PATH       Runtime environment file
+  --multifidelity-plan PATH  Override the plan from the runtime environment
   --start                  Start the tmux lane; without this flag only validate
 EOF
 }
@@ -45,6 +47,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --runtime-env)
             runtime_env="$2"
+            shift 2
+            ;;
+        --multifidelity-plan)
+            multifidelity_plan="$2"
             shift 2
             ;;
         --start)
@@ -83,6 +89,9 @@ fi
 # shellcheck disable=SC1090
 source "$runtime_env"
 workspace_root="${AUTORESEARCH_WORKSPACE_ROOT:-$workspace_root}"
+if [[ -n "$multifidelity_plan" ]]; then
+    export AUTORESEARCH_MULTIFIDELITY_PLAN="$multifidelity_plan"
+fi
 campaign_name="${campaign_name:-multifidelity-pilot-gpu${gpu_index}}"
 campaign_root="$workspace_root/runs/$campaign_name"
 log_path="$workspace_root/logs/${campaign_name}.log"

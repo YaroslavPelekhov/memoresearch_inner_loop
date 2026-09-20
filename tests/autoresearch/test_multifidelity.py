@@ -115,11 +115,14 @@ def test_probe_features_match_preregistered_definitions() -> None:
         previous_main_fitness=0.35,
         probe_fitness=0.55,
         previous_probe_fitness=0.43,
+        control_fitness=0.48,
     )
 
     assert features.delta_fitness == pytest.approx(0.05)
     assert features.local_headroom == pytest.approx(0.15)
     assert features.probe_progress == pytest.approx(0.12)
+    assert features.control_fitness == pytest.approx(0.48)
+    assert features.fork_to_zero_effect == pytest.approx(0.07)
 
 
 def test_kill_gate_requires_recall_lower_bound() -> None:

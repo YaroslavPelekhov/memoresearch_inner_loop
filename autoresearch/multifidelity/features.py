@@ -17,8 +17,9 @@ def build_probe_features(
     previous_main_fitness: float | None,
     probe_fitness: float | None,
     previous_probe_fitness: float | None,
+    control_fitness: float | None = None,
 ) -> ProbeFeatures:
-    """Build F, delta-F, H=V-F, and E=V-V(previous)."""
+    """Build trajectory, terminalization, and matched-control features."""
 
     return ProbeFeatures(
         main_fitness=main_fitness,
@@ -35,5 +36,11 @@ def build_probe_features(
             None
             if probe_fitness is None or previous_probe_fitness is None
             else probe_fitness - previous_probe_fitness
+        ),
+        control_fitness=control_fitness,
+        fork_to_zero_effect=(
+            None
+            if probe_fitness is None or control_fitness is None
+            else probe_fitness - control_fitness
         ),
     )

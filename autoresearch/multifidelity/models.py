@@ -44,6 +44,7 @@ class MultiFidelityPlan(StrictModel):
     confidence_method: Literal["exact_clopper_pearson"] = "exact_clopper_pearson"
     winner_recall_floor: float = Field(default=0.95, gt=0.0, le=1.0)
     confidence_level: float = Field(default=0.95, gt=0.0, lt=1.0)
+    matched_control_probes: bool = False
     rungs: list[FidelityRung] = Field(min_length=2)
 
     @model_validator(mode="after")
@@ -96,6 +97,8 @@ class ProbeFeatures(StrictModel):
     probe_fitness: float | None = None
     local_headroom: float | None = None
     probe_progress: float | None = None
+    control_fitness: float | None = None
+    fork_to_zero_effect: float | None = None
 
 
 class GateDecision(StrictModel):
@@ -112,6 +115,7 @@ class RungObservation(StrictModel):
     budget_batches: int
     main_metrics: dict[str, float]
     probe_metrics: dict[str, float] | None = None
+    control_metrics: dict[str, float] | None = None
     features: ProbeFeatures
     probability: ProbabilityEstimate | None = None
     decision: GateDecision
