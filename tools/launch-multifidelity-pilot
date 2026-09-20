@@ -11,6 +11,7 @@ campaign_name=""
 target_rounds="${AUTORESEARCH_PILOT_TARGET_ROUNDS:-4}"
 evolution_generations="${AUTORESEARCH_PILOT_EVOLUTION_GENERATIONS:-4}"
 multifidelity_plan=""
+research_task="$repo_root/problems/llm_foundry_autoresearch/research_task.yaml"
 start=false
 
 usage() {
@@ -23,6 +24,7 @@ Options:
   --evolution-generations N  Default: 4
   --runtime-env PATH       Runtime environment file
   --multifidelity-plan PATH  Override the plan from the runtime environment
+  --task PATH              Research-task file that binds the campaign protocol
   --start                  Start the tmux lane; without this flag only validate
 EOF
 }
@@ -51,6 +53,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --multifidelity-plan)
             multifidelity_plan="$2"
+            shift 2
+            ;;
+        --task)
+            research_task="$2"
             shift 2
             ;;
         --start)
@@ -117,6 +123,7 @@ required_paths=(
     "$DCLM_SCREEN_MDS_PATH/validation/index.json"
     "$DCLM_CORE_PATH"
     "$AUTORESEARCH_MULTIFIDELITY_PLAN"
+    "$research_task"
     "$lane_mds_path/corpus-manifest.json"
     "$lane_screen_mds_path/corpus-manifest.json"
     "$lane_screen_mds_path/holdout-split-manifest.json"
@@ -128,6 +135,27 @@ for path in "${required_paths[@]}"; do
         exit 3
     fi
 done
+
+if ! "$AUTORESEARCH_PYTHON" - "$repo_root" "$research_task" \
+    "$AUTORESEARCH_MULTIFIDELITY_PLAN" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+repo_root, task_path, expected_plan = map(Path, sys.argv[1:])
+task = yaml.safe_load(task_path.read_text(encoding="utf-8"))
+task_plan = Path(task["multifidelity_plan"])
+if not task_plan.is_absolute():
+    task_plan = repo_root / task_plan
+if task_plan.resolve() != expected_plan.resolve():
+    raise SystemExit(
+        f"research task binds {task_plan.resolve()}, expected {expected_plan.resolve()}"
+    )
+PY
+then
+    echo "Research task and multi-fidelity plan do not match" >&2
+    exit 3
+fi
 
 assert_port_private() {
     local label="$1" host="$2" port="$3" pidfile="$4" owner_root="$5"
@@ -222,6 +250,7 @@ echo "ready: gpu=$gpu_index commit=$commit campaign=$campaign_root"
 echo "resources: memory_used=${memory_used}MiB utilization=${utilization}%"
 echo "streaming: prefix_range=${streaming_prefix_base}-$((streaming_prefix_base + 99999))"
 echo "data: train=$lane_mds_path screen=$lane_screen_mds_path"
+echo "protocol: task=$research_task plan=$AUTORESEARCH_MULTIFIDELITY_PLAN"
 if [[ "$start" != true ]]; then
     echo "validation only; add --start to launch $session_name"
     exit 0
@@ -237,6 +266,6 @@ mkdir -p \
     "$TMPDIR" \
     "$AUTORESEARCH_REDIS_DIR" \
     "$lane_eval_cache_path"
-launch_command="cd '$repo_root' && source '$runtime_env' && export CUDA_VISIBLE_DEVICES='$gpu_index' AUTORESEARCH_CAMPAIGN_ROOT='$campaign_root' AUTORESEARCH_STREAMING_PREFIX_BASE='$streaming_prefix_base' AUTORESEARCH_MULTIFIDELITY_PLAN='$AUTORESEARCH_MULTIFIDELITY_PLAN' DCLM_MDS_PATH='$lane_mds_path' DCLM_SCREEN_MDS_PATH='$lane_screen_mds_path' DCLM_EVAL_CACHE_PATH='$lane_eval_cache_path' && '$repo_root/tools/redis-start' && exec '$AUTORESEARCH_PYTHON' -u tools/run-idea-campaign-supervised.py --campaign-root '$campaign_root' --target-rounds '$target_rounds' --model '$CODEX_MODEL' --evolution-generations '$evolution_generations' >>'$log_path' 2>&1"
+launch_command="cd '$repo_root' && source '$runtime_env' && export CUDA_VISIBLE_DEVICES='$gpu_index' AUTORESEARCH_CAMPAIGN_ROOT='$campaign_root' AUTORESEARCH_STREAMING_PREFIX_BASE='$streaming_prefix_base' AUTORESEARCH_MULTIFIDELITY_PLAN='$AUTORESEARCH_MULTIFIDELITY_PLAN' DCLM_MDS_PATH='$lane_mds_path' DCLM_SCREEN_MDS_PATH='$lane_screen_mds_path' DCLM_EVAL_CACHE_PATH='$lane_eval_cache_path' && '$repo_root/tools/redis-start' && exec '$AUTORESEARCH_PYTHON' -u tools/run-idea-campaign-supervised.py --campaign-root '$campaign_root' --task '$research_task' --target-rounds '$target_rounds' --model '$CODEX_MODEL' --evolution-generations '$evolution_generations' >>'$log_path' 2>&1"
 tmux -S "$tmux_socket" new-session -d -s "$session_name" "$launch_command"
 echo "started: tmux=$session_name log=$log_path"

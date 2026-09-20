@@ -1,0 +1,27 @@
+id: dclm-hybrid-gdn-140m-fork-to-zero-mechanism-v1
+title: Matched-control Fork-to-zero mechanism test
+description: >-
+  Produce diverse Gated DeltaNet candidates for a locked mechanism test of
+  Fork-to-zero. Every candidate follows the untouched main trajectory to 4096
+  batches. At the preregistered 1024-batch checkpoint, equal-compute shadow
+  branches compare the original scheduler against a cosine LR decay to zero.
+fixed_contract:
+  - Odd decoder layers use the unchanged Llama Transformer attention.
+  - Even decoder layers use the mutable AutoresearchGatedDeltaNet.
+  - Dataset, tokenizer, model scale, optimizer peak LR, training horizon, evaluation, and metric parsing are fixed.
+  - Candidate parameter count must remain within the measured hybrid baseline bounds.
+  - Raw evidence is auditable but only idea-level takeaways feed later idea generation.
+  - Every main trajectory reaches the full 4096-batch horizon; no candidate is killed or promoted early.
+  - The main LR schedule is fixed to the 4096-batch horizon at every fidelity rung.
+  - At batch 1024, the matched control and Fork-to-zero branches start from the same read-only checkpoint and each run for 256 batches.
+  - Shadow branches never write into or alter the main checkpoint.
+mutable_files:
+  - autoresearch/model/gdn.py
+canonical_ref: HEAD
+proposal_count: 5
+parent_candidate_count: 8
+evolution_generations: 4
+screen_batches: 1024
+confirmation_batches: 4096
+screen_eval_batches: 32
+multifidelity_plan: config/multifidelity/dclm-140m-fork-to-zero-mechanism-v1.yaml

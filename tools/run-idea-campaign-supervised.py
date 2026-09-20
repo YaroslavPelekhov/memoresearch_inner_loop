@@ -27,12 +27,18 @@ def _record(root: Path, **event: object) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign-root", type=Path, required=True)
+    parser.add_argument(
+        "--task",
+        type=Path,
+        default=Path("problems/llm_foundry_autoresearch/research_task.yaml"),
+    )
     parser.add_argument("--target-rounds", type=int, required=True)
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--evolution-generations", type=int, default=4)
     parser.add_argument("--retry-limit", type=int, default=3)
     args = parser.parse_args()
     root = args.campaign_root.expanduser().resolve()
+    task = args.task.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     if args.target_rounds < 1:
         parser.error("--target-rounds must be positive")
@@ -42,6 +48,8 @@ def main() -> int:
         str(Path(__file__).resolve()),
         "--campaign-root",
         str(root),
+        "--task",
+        str(task),
         "--target-rounds",
         str(args.target_rounds),
         "--model",
@@ -73,6 +81,7 @@ def main() -> int:
                         "AUTORESEARCH_BENCHMARK_TIMEOUT",
                         "AUTORESEARCH_STAGE_TIMEOUT",
                         "AUTORESEARCH_DAG_TIMEOUT",
+                        "AUTORESEARCH_MULTIFIDELITY_PLAN",
                         "CODEX_MODEL",
                         "CODEX_SERVICE_TIER",
                     )
@@ -103,6 +112,8 @@ def main() -> int:
                 "autoresearch.ideas.campaign",
                 "--campaign-root",
                 str(root),
+                "--task",
+                str(task),
                 "--rounds",
                 "1",
                 "--filter-mode",
