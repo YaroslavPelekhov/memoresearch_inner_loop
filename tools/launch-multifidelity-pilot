@@ -237,6 +237,6 @@ mkdir -p \
     "$TMPDIR" \
     "$AUTORESEARCH_REDIS_DIR" \
     "$lane_eval_cache_path"
-launch_command="cd '$repo_root' && source '$runtime_env' && export CUDA_VISIBLE_DEVICES='$gpu_index' AUTORESEARCH_CAMPAIGN_ROOT='$campaign_root' AUTORESEARCH_STREAMING_PREFIX_BASE='$streaming_prefix_base' DCLM_MDS_PATH='$lane_mds_path' DCLM_SCREEN_MDS_PATH='$lane_screen_mds_path' DCLM_EVAL_CACHE_PATH='$lane_eval_cache_path' && '$repo_root/tools/redis-start' && exec '$AUTORESEARCH_PYTHON' -u tools/run-idea-campaign-supervised.py --campaign-root '$campaign_root' --target-rounds '$target_rounds' --model '$CODEX_MODEL' --evolution-generations '$evolution_generations' >>'$log_path' 2>&1"
+launch_command="cd '$repo_root' && source '$runtime_env' && export CUDA_VISIBLE_DEVICES='$gpu_index' AUTORESEARCH_CAMPAIGN_ROOT='$campaign_root' AUTORESEARCH_STREAMING_PREFIX_BASE='$streaming_prefix_base' AUTORESEARCH_MULTIFIDELITY_PLAN='$AUTORESEARCH_MULTIFIDELITY_PLAN' DCLM_MDS_PATH='$lane_mds_path' DCLM_SCREEN_MDS_PATH='$lane_screen_mds_path' DCLM_EVAL_CACHE_PATH='$lane_eval_cache_path' && '$repo_root/tools/redis-start' && exec '$AUTORESEARCH_PYTHON' -u tools/run-idea-campaign-supervised.py --campaign-root '$campaign_root' --target-rounds '$target_rounds' --model '$CODEX_MODEL' --evolution-generations '$evolution_generations' >>'$log_path' 2>&1"
 tmux -S "$tmux_socket" new-session -d -s "$session_name" "$launch_command"
 echo "started: tmux=$session_name log=$log_path"
