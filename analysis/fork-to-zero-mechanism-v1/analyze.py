@@ -82,6 +82,7 @@ def _lineage(root: Path, trajectory: Path) -> str:
 def collect(campaign_roots: list[Path]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     exclusions = Counter()
+    incomplete_failures: list[dict[str, Any]] = []
     source_digest = sha256()
     plan_hashes: set[str] = set()
     for root in campaign_roots:
@@ -104,6 +105,37 @@ def collect(campaign_roots: list[Path]) -> tuple[list[dict[str, Any]], dict[str,
             complete = trajectory[-1].get("budget_batches") == 4096
             if not complete:
                 exclusions["incomplete"] += 1
+                for log in sorted(path.parent.rglob("wrapper.stderr.log")):
+                    feedback: dict[str, Any] | None = None
+                    for line in reversed(log.read_text(encoding="utf-8").splitlines()):
+                        marker = "[gigaevo] structured feedback:"
+                        if marker not in line:
+                            continue
+                        try:
+                            value = json.loads(line.split(marker, 1)[1].strip())
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(value, dict):
+                            feedback = value
+                            break
+                    if not feedback or feedback.get("status") in {
+                        "screen_complete",
+                        "multifidelity_complete",
+                    }:
+                        continue
+                    incomplete_failures.append(
+                        {
+                            "campaign": root.name,
+                            "commit": str(trajectory[0].get("commit")),
+                            "last_budget": int(trajectory[-1]["budget_batches"]),
+                            "stage": str(log.relative_to(path.parent)),
+                            "status": feedback.get("status"),
+                            "error_type": feedback.get("error_type"),
+                            "nonfinite_batch": (
+                                feedback.get("nonfinite_gradient") or {}
+                            ).get("batch"),
+                        }
+                    )
                 continue
             by_budget = {int(item["budget_batches"]): item for item in trajectory}
             if not all(budget in by_budget for budget in (256, 512, 1024, 4096)):
@@ -150,6 +182,7 @@ def collect(campaign_roots: list[Path]) -> tuple[list[dict[str, Any]], dict[str,
         "source_sha256": source_digest.hexdigest(),
         "plan_sha256": next(iter(plan_hashes)),
         "exclusions": dict(exclusions),
+        "incomplete_failure_audit": incomplete_failures,
     }
 
 
@@ -483,6 +516,12 @@ def main() -> int:
 
     predictions = cross_campaign_predictions(commits, l2=1.0)
     models, model_gain = model_table(predictions, l2=1.0)
+    extreme_fork_effect = min(commits, key=lambda row: float(row["fork_effect"]))
+    commits_without_extreme = [
+        row for row in commits if row["commit"] != extreme_fork_effect["commit"]
+    ]
+    robust_predictions = cross_campaign_predictions(commits_without_extreme, l2=1.0)
+    robust_models, robust_gain = model_table(robust_predictions, l2=1.0)
     sensitivity = []
     for l2 in (0.01, 0.1, 1.0, 10.0, 100.0):
         current_predictions = cross_campaign_predictions(commits, l2=l2)
@@ -557,6 +596,16 @@ def main() -> int:
         "correlations": correlations,
         "model_comparison": models,
         "fork_vs_control_model_gain": model_gain,
+        "extreme_fork_effect_sensitivity": {
+            "excluded_commit": extreme_fork_effect["commit"],
+            "fork_effect": extreme_fork_effect["fork_effect"],
+            "main_1024": extreme_fork_effect["main_1024"],
+            "control_fitness": extreme_fork_effect["control_fitness"],
+            "probe_fitness": extreme_fork_effect["probe_fitness"],
+            "final_fitness": extreme_fork_effect["final_fitness"],
+            "model_comparison_without_commit": robust_models,
+            "fork_vs_control_gain_without_commit": robust_gain,
+        },
         "selection": selection_stats,
         "fork_effect": effect_stats,
         "repeatability": repeatability,
@@ -581,15 +630,29 @@ def main() -> int:
     model_ci_positive = gain["squared_error_gain_ci95_lower"] > 0.0
     regret_campaigns = selection["regret_campaign_means"]
     regret_direction_consistent = all(value >= 0.0 for value in regret_campaigns.values())
-    if model_direction_consistent and model_ci_positive and regret_direction_consistent:
-        verdict = "positive exploratory evidence"
-    elif (
-        gain["squared_error_gain_control_minus_fork"] <= 0.0
-        and selection["regret_gain_control_minus_probe"] <= 0.0
+    direct_ci = corr["probe_minus_control_correlation"]
+    direct_positive = direct_ci["commit_bootstrap_ci95_lower"] > 0.0
+    selection_positive = (
+        selection["regret_gain_lineage_bootstrap_ci95"][0] > 0.0
+        and regret_direction_consistent
+    )
+    robust_positive = (
+        robust_gain["squared_error_gain_control_minus_fork"] > 0.0
+        and robust_gain["absolute_error_gain_control_minus_fork"] > 0.0
+    )
+    if (
+        model_direction_consistent
+        and model_ci_positive
+        and direct_positive
+        and selection_positive
+        and robust_positive
     ):
-        verdict = "no exploratory support"
+        verdict = "positive exploratory evidence"
     else:
-        verdict = "mixed or inconclusive exploratory evidence"
+        verdict = (
+            "not supported for candidate ranking; possible instability "
+            "stress-test signal"
+        )
     summary["verdict"] = verdict
     (output / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True, allow_nan=False) + "\n",
@@ -642,6 +705,17 @@ def main() -> int:
         f"{gain['squared_error_gain_ci95_lower']:.9f} to "
         f"{gain['squared_error_gain_ci95_upper']:.9f}).",
         f"- Campaign-specific squared-error gains: {json.dumps(campaign_gains, sort_keys=True)}.",
+        f"- The apparent gain is dominated by commit `{extreme_fork_effect['commit']}`: "
+        f"main@1024={extreme_fork_effect['main_1024']:.6f}, "
+        f"control={extreme_fork_effect['control_fitness']:.6f}, "
+        f"fork={extreme_fork_effect['probe_fitness']:.6f}, and "
+        f"final={extreme_fork_effect['final_fitness']:.6f}.",
+        f"- Without that commit, control MAE="
+        f"{next(row for row in robust_models if row['variant'] == 'trajectory_plus_control')['mae']:.6f} "
+        f"and Fork-to-zero MAE="
+        f"{next(row for row in robust_models if row['variant'] == 'trajectory_plus_fork_to_zero')['mae']:.6f}; "
+        f"the absolute-error gain becomes "
+        f"{robust_gain['absolute_error_gain_control_minus_fork']:.9f}.",
         "",
         "## Candidate selection within idea lineages",
         "",
@@ -656,6 +730,20 @@ def main() -> int:
         f"{selection['pairwise_accuracy_gain_probe_minus_control']:.3f}.",
         f"- Early-rank-reversal accuracy gain, fork minus control: "
         f"{selection['reversal_accuracy_gain_probe_minus_control']:.3f}.",
+        f"- For reference, raw main@1024 has mean top-1 regret "
+        f"{selection['mean_main_1024_regret']:.6f} and top-1 hit rate "
+        f"{selection['mean_main_1024_top1_hit']:.3f}, versus Fork-to-zero "
+        f"regret {selection['mean_probe_fitness_regret']:.6f} and hit rate "
+        f"{selection['mean_probe_fitness_top1_hit']:.3f}.",
+        "",
+        "## Incomplete-run audit",
+        "",
+        *[
+            f"- `{item['commit']}` at {item['stage']}: "
+            f"status={item['status']}, error={item['error_type']}, "
+            f"nonfinite_batch={item['nonfinite_batch']}."
+            for item in provenance["incomplete_failure_audit"]
+        ],
         "",
         "## Interpretation limits",
         "",
