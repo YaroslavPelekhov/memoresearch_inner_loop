@@ -612,6 +612,7 @@ def test_diagnostic_overrides_retain_tensorboard_logging() -> None:
 
     assert "debug.overrides.max_duration=3300ba" in overrides
     assert "debug.startup_speedups.disable_all_evaluators=true" in overrides
+    assert "debug.overrides.eval_subset_num_batches=-1" in overrides
     assert "debug.overrides.save_folder=null" in overrides
     assert "debug.overrides.loggers={}" not in overrides
 

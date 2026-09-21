@@ -138,6 +138,35 @@ def test_evaluation_refuses_positive_claim_when_sample_is_too_small() -> None:
     assert result["fork_minus_control_sensitivity"]["estimate"] == pytest.approx(1.0)
 
 
+def test_aggregate_excludes_repeated_canonical_commit() -> None:
+    def row(commit: str, *, is_baseline: bool) -> dict[str, object]:
+        return {
+            "campaign": "fork-zero-stability-v1-gpu0-pool1",
+            "gpu": "0",
+            "commit": commit,
+            "checkpoint": 512,
+            "is_baseline": is_baseline,
+            "outcome": False,
+            "outcome_batch": None,
+            "fork_alarm": False,
+            "fork_score": 0.0,
+            "control_alarm": False,
+            "control_score": 0.0,
+            "gradient_alarm": False,
+            "gradient_score": 0.0,
+        }
+
+    rows = [
+        row("canonical", is_baseline=True),
+        row("canonical", is_baseline=False),
+        row("candidate", is_baseline=False),
+    ]
+
+    candidates = ANALYSIS.aggregate_candidates(rows)
+
+    assert [candidate["commit"] for candidate in candidates] == ["candidate"]
+
+
 def test_evaluation_accepts_only_full_preregistered_campaign_matrix() -> None:
     rows = []
     for campaign in sorted(ANALYSIS.EXPECTED_CAMPAIGNS):

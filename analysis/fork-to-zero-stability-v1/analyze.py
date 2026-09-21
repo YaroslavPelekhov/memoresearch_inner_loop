@@ -294,9 +294,15 @@ def collect(
 def aggregate_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Reduce checkpoints and within-campaign repeated commits conservatively."""
 
+    # GigaEvo may evaluate the canonical commit again when it is included in the
+    # seed refs.  The preregistration excludes canonical baselines, regardless
+    # of which artifact directory contains the repeated trajectory.
+    baseline_commits = {
+        str(row["commit"]) for row in rows if bool(row["is_baseline"])
+    }
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        if row["is_baseline"]:
+        if row["is_baseline"] or str(row["commit"]) in baseline_commits:
             continue
         grouped[(str(row["campaign"]), str(row["commit"]))].append(row)
     result = []

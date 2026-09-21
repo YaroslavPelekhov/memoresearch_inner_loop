@@ -73,4 +73,24 @@ before every launch. The frozen wrapper is
 
 ## Amendments
 
-None.
+### 2026-09-21 — post-pool-1 implementation corrections
+
+After collecting `fork-zero-stability-v1-gpu1-pool1`, we found two mechanical
+issues that do not alter any frozen detector, outcome, reliability, or stopping
+threshold:
+
+1. GigaEvo had repeated the canonical commit under `implementations/` because
+   it was present in the seed refs. The frozen analysis excluded paths under
+   `baselines/`, but not the same canonical commit at another path. Analysis now
+   excludes every trajectory whose commit equals a canonical-baseline commit.
+   This changes pool 1 from five to four eligible experimental negatives.
+2. Mutation smoke runs inherited the screen value
+   `eval_subset_num_batches=32` while debug mode removed the eval dataloader.
+   Composer rejected this combination before training, preventing two otherwise
+   distinct mutations from reaching evaluation. Debug runs now explicitly
+   restore the Composer default `eval_subset_num_batches=-1` whenever evaluators
+   are disabled.
+
+These corrections were made after pool 1 and before any later pool. Pool-1
+measurements were not rerun or relabeled; only the duplicated canonical commit
+was removed from the candidate population.

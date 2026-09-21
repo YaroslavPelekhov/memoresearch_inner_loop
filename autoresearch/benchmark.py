@@ -520,6 +520,9 @@ def _training_overrides(
     overrides = [
         "debug.use_debug=true",
         "debug.startup_speedups.disable_all_evaluators=true",
+        # Screen configs set this to 32.  Composer rejects a non-default value
+        # once debug mode removes the eval dataloader, so reset it explicitly.
+        "debug.overrides.eval_subset_num_batches=-1",
         f"debug.overrides.max_duration={batches}ba",
         "debug.overrides.console_log_interval=1ba",
         "debug.overrides.save_folder=null",
