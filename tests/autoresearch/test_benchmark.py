@@ -22,6 +22,7 @@ from autoresearch.benchmark import (
     _nonfinite_training_loss,
     _parameter_count,
     _steady_state_tokens_per_second,
+    _summarize_gradient_samples,
     _training_overrides,
 )
 from autoresearch.mds_provenance import MDS_PROVENANCE_POLICY, mds_source_tree_sha256
@@ -91,6 +92,24 @@ def test_runtime_override_rejects_nondivisible_microbatch(tmp_path: Path) -> Non
             gradient_log_interval=None,
             disable_optimizer_metrics=False,
         )
+
+
+def test_gradient_diagnostic_summary_uses_finite_nearest_rank_p95() -> None:
+    summary = _summarize_gradient_samples(
+        [float("nan"), *map(float, range(1, 21))],
+        [0.0, 1.0, 1.0, float("nan")],
+    )
+
+    assert summary == {
+        "gradient_norm_pre_clip_max": 20.0,
+        "gradient_norm_pre_clip_p95": 19.0,
+        "gradient_diagnostic_observations": 20.0,
+        "gradient_clipping_fraction": pytest.approx(2 / 3),
+    }
+
+
+def test_gradient_diagnostic_summary_requires_finite_norms() -> None:
+    assert _summarize_gradient_samples([float("nan")], [1.0]) == {}
 
 
 def test_screen_contract_has_exactly_four_heldout_evaluations(tmp_path: Path) -> None:

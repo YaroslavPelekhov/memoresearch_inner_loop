@@ -189,6 +189,65 @@ def _steady_state_tokens_per_second(
     return max(samples, key=lambda item: item[0])[1]
 
 
+def _summarize_gradient_samples(
+    gradient_norms: list[float], clipping_events: list[float]
+) -> dict[str, float]:
+    """Summarize finite gradient telemetry without adding a NumPy dependency."""
+
+    finite_norms = sorted(value for value in gradient_norms if math.isfinite(value))
+    finite_clipping = [value for value in clipping_events if math.isfinite(value)]
+    if not finite_norms:
+        return {}
+    percentile_index = max(0, math.ceil(0.95 * len(finite_norms)) - 1)
+    metrics = {
+        "gradient_norm_pre_clip_max": finite_norms[-1],
+        "gradient_norm_pre_clip_p95": finite_norms[percentile_index],
+        "gradient_diagnostic_observations": float(len(finite_norms)),
+    }
+    if finite_clipping:
+        metrics["gradient_clipping_fraction"] = sum(finite_clipping) / len(
+            finite_clipping
+        )
+    return metrics
+
+
+def _gradient_diagnostic_metrics(run_dir: Path) -> dict[str, float]:
+    """Read pre-clipping norm and clipping-rate summaries from TensorBoard."""
+
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import (
+            EventAccumulator,
+        )
+    except ImportError:
+        return {}
+    by_tag_and_step: dict[str, dict[int, tuple[float, float]]] = {
+        "l2_norm/grad/pre_clip_global": {},
+        "gradient_clipping/was_applied": {},
+    }
+    for event_path in sorted(run_dir.rglob("events.out.tfevents.*")):
+        try:
+            accumulator = EventAccumulator(
+                str(event_path), size_guidance={"scalars": 0}
+            ).Reload()
+            for tag, values in by_tag_and_step.items():
+                for scalar in accumulator.Scalars(tag):
+                    previous = values.get(scalar.step)
+                    if previous is None or scalar.wall_time >= previous[0]:
+                        values[scalar.step] = (
+                            float(scalar.wall_time),
+                            float(scalar.value),
+                        )
+        except (KeyError, OSError):
+            continue
+    gradient_norms = [
+        value for _, value in by_tag_and_step["l2_norm/grad/pre_clip_global"].values()
+    ]
+    clipping_events = [
+        value for _, value in by_tag_and_step["gradient_clipping/was_applied"].values()
+    ]
+    return _summarize_gradient_samples(gradient_norms, clipping_events)
+
+
 def _heldout_loss_metrics(stderr_path: Path) -> dict[str, float] | None:
     """Parse the fixed validation-loss trajectory printed by Composer."""
 
@@ -1318,6 +1377,7 @@ def main() -> int:
         steady_state_tokens_per_second = _steady_state_tokens_per_second(
             stderr_path, run_dir
         )
+        gradient_diagnostics = _gradient_diagnostic_metrics(run_dir)
         _emit(
             {
                 "fitness": fitness,
@@ -1331,6 +1391,7 @@ def main() -> int:
                 "peak_gpu_memory_mib": (
                     peak_gpu_memory_mib if peak_gpu_memory_mib is not None else 81920.0
                 ),
+                **gradient_diagnostics,
                 **({"n_params": float(n_params)} if n_params is not None else {}),
             },
             {

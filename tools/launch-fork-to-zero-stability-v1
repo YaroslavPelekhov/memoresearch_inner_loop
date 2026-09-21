@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Validate or start one preregistered independent stability-detector pool.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+gpu=""
+pool=""
+runtime_env=""
+start=false
+
+usage() {
+    cat <<'EOF'
+Usage: tools/launch-fork-to-zero-stability-v1 --gpu 0|1 --pool 1|2|3|4 [options]
+
+Options:
+  --runtime-env PATH  Override the isolated server runtime environment
+  --start             Start after validation; otherwise validation only
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --gpu)
+            gpu="$2"
+            shift 2
+            ;;
+        --pool)
+            pool="$2"
+            shift 2
+            ;;
+        --runtime-env)
+            runtime_env="$2"
+            shift 2
+            ;;
+        --start)
+            start=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ "$gpu" != "0" && "$gpu" != "1" ]]; then
+    echo "--gpu must be 0 or 1" >&2
+    exit 2
+fi
+if [[ ! "$pool" =~ ^[1-4]$ ]]; then
+    echo "--pool must be 1, 2, 3, or 4" >&2
+    exit 2
+fi
+
+command=(
+    "$repo_root/tools/launch-multifidelity-pilot"
+    --gpu "$gpu"
+    --campaign "fork-zero-stability-v1-gpu${gpu}-pool${pool}"
+    --target-rounds 1
+    --evolution-generations 6
+    --multifidelity-plan "$repo_root/config/multifidelity/dclm-140m-fork-to-zero-stability-v1.yaml"
+    --task "$repo_root/problems/llm_foundry_autoresearch/research_task_fork_to_zero_stability_v1.yaml"
+)
+if [[ -n "$runtime_env" ]]; then
+    command+=(--runtime-env "$runtime_env")
+fi
+if [[ "$start" == true ]]; then
+    command+=(--start)
+fi
+exec "${command[@]}"

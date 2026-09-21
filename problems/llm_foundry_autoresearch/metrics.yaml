@@ -99,6 +99,46 @@ specs:
     include_in_prompts: true
     significant_change: 60.0
     sentinel_value: 100000.0
+  gradient_norm_pre_clip_max:
+    description: Maximum finite global gradient norm observed before clipping.
+    decimals: 6
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 1000000000.0
+    include_in_prompts: false
+    significant_change: 0.1
+    sentinel_value: 1000000000.0
+  gradient_norm_pre_clip_p95:
+    description: Nearest-rank 95th percentile of finite global pre-clipping gradient norms.
+    decimals: 6
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 1000000000.0
+    include_in_prompts: false
+    significant_change: 0.1
+    sentinel_value: 1000000000.0
+  gradient_clipping_fraction:
+    description: Fraction of logged gradient observations where norm clipping was applied.
+    decimals: 6
+    is_primary: false
+    higher_is_better: false
+    lower_bound: 0.0
+    upper_bound: 1.0
+    include_in_prompts: false
+    significant_change: 0.01
+    sentinel_value: 1.0
+  gradient_diagnostic_observations:
+    description: Number of finite pre-clipping gradient observations in the run segment.
+    decimals: 0
+    is_primary: false
+    higher_is_better: true
+    lower_bound: 0.0
+    upper_bound: 1000000.0
+    include_in_prompts: false
+    significant_change: 1.0
+    sentinel_value: 0.0
   n_params:
     description: Instantiated LLM Foundry model parameter count; fixed within 1% of the baseline.
     decimals: 0

@@ -1,0 +1,33 @@
+id: dclm-hybrid-gdn-140m-fork-to-zero-stability-v1
+title: Fork-to-zero instability detector confirmation
+description: >-
+  Test whether Fork-to-zero detects optimization collapse earlier and more
+  reliably than an equal-compute continuation or ordinary gradient telemetry.
+  Produce mechanistically diverse Gated DeltaNet candidates near plausible
+  stability boundaries: aggressive and conservative gate parameterizations,
+  state-update normalizations, decay rules, and recurrent mixing variants.
+  Do not insert artificial exceptions, NaNs, resource bombs, or code whose
+  purpose is merely to fail. Each independent campaign selects one idea from
+  the canonical model and does not inherit implementations or takeaways from
+  another campaign.
+fixed_contract:
+  - Odd decoder layers use the unchanged Llama Transformer attention.
+  - Even decoder layers use the mutable AutoresearchGatedDeltaNet.
+  - Dataset, tokenizer, model scale, optimizer peak LR, training horizon, evaluation, and metric parsing are fixed.
+  - Candidate parameter count must remain within the measured hybrid baseline bounds.
+  - Every main trajectory targets the full 4096-batch horizon; no detector may kill or promote a candidate.
+  - The main LR schedule is fixed to the 4096-batch horizon at every fidelity rung.
+  - At batches 512 and 1024, matched control and Fork-to-zero branches start from the same read-only checkpoint and each run for 256 batches.
+  - Shadow branches never write into or alter the main checkpoint.
+  - Model-intrinsic non-finite loss or gradients count as collapse; CUDA OOM, checkpoint incompatibility, storage, network, and orchestration failures are censored.
+  - Detector thresholds and success criteria are frozen in experiments/fork-to-zero/stability-v1/03_preregistration.md before launch.
+mutable_files:
+  - autoresearch/model/gdn.py
+canonical_ref: HEAD
+proposal_count: 8
+parent_candidate_count: 8
+evolution_generations: 6
+screen_batches: 1024
+confirmation_batches: 4096
+screen_eval_batches: 32
+multifidelity_plan: config/multifidelity/dclm-140m-fork-to-zero-stability-v1.yaml

@@ -1,0 +1,35 @@
+version: 3
+
+# Confirmatory stability-detector test. Every candidate follows the untouched
+# main trajectory to 4,096 batches. At batches 512 and 1,024, equal-compute
+# 256-batch shadows compare the original scheduler with a cosine LR descent to
+# zero. Decisions remain observe-only: neither detector may alter training.
+observe_only: true
+calibrated: false
+matched_control_probes: true
+confidence_method: exact_clopper_pearson
+winner_recall_floor: 0.95
+confidence_level: 0.95
+schedule_reference_batches: 4096
+
+rungs:
+  - budget_batches: 256
+    probe_batches: 0
+    kill_gate: 0.01
+    promote_gate: 0.99
+  - budget_batches: 512
+    probe_batches: 256
+    kill_gate: 0.03
+    promote_gate: 0.96
+  - budget_batches: 1024
+    probe_batches: 256
+    kill_gate: 0.10
+    promote_gate: 0.88
+  - budget_batches: 2048
+    probe_batches: 0
+    kill_gate: 0.25
+    promote_gate: 0.72
+  - budget_batches: 4096
+    probe_batches: 0
+    kill_gate: 0.49
+    promote_gate: 0.51
