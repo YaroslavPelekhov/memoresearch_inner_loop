@@ -1,0 +1,38 @@
+version: 3
+
+# Exact replication and onset map for the b3a210 retention-gradient-floor
+# mutation.  The three 256-batch matched shadows locate whether Fork-to-zero
+# reacts before an unchanged continuation.  The main branch is never pruned.
+observe_only: true
+calibrated: false
+matched_control_probes: true
+confidence_method: exact_clopper_pearson
+winner_recall_floor: 0.95
+confidence_level: 0.95
+schedule_reference_batches: 4096
+
+rungs:
+  - budget_batches: 256
+    probe_batches: 0
+    kill_gate: 0.01
+    promote_gate: 0.99
+  - budget_batches: 512
+    probe_batches: 256
+    kill_gate: 0.03
+    promote_gate: 0.96
+  - budget_batches: 768
+    probe_batches: 256
+    kill_gate: 0.06
+    promote_gate: 0.92
+  - budget_batches: 1024
+    probe_batches: 256
+    kill_gate: 0.10
+    promote_gate: 0.88
+  - budget_batches: 2048
+    probe_batches: 0
+    kill_gate: 0.25
+    promote_gate: 0.72
+  - budget_batches: 4096
+    probe_batches: 0
+    kill_gate: 0.49
+    promote_gate: 0.51

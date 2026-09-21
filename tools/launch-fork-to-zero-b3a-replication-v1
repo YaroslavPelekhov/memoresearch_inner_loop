@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# Validate or start the frozen six-pair b3a210 replication sequence.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+runtime_env="${AUTORESEARCH_RUNTIME_ENV:-$repo_root/config/server/euler-yaroslav-multifidelity.env}"
+campaign_name="fork-zero-b3a-replication-v1"
+session_name="yaroslav-b3a-repl"
+start=false
+
+usage() {
+    cat <<'EOF'
+Usage: tools/launch-fork-to-zero-b3a-replication-v1 [options]
+
+Options:
+  --campaign NAME     Campaign directory name
+  --runtime-env PATH  Isolated server runtime environment
+  --start             Start the full sequence; otherwise validate only
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --campaign)
+            campaign_name="$2"
+            shift 2
+            ;;
+        --runtime-env)
+            runtime_env="$2"
+            shift 2
+            ;;
+        --start)
+            start=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ ! -f "$runtime_env" ]]; then
+    echo "Missing runtime environment: $runtime_env" >&2
+    exit 3
+fi
+# shellcheck disable=SC1090
+source "$runtime_env"
+
+private_root="/home/bulatov/yaroslav-multifidelity"
+if [[ "${AUTORESEARCH_WORKSPACE_ROOT:-}" != "$private_root" ]]; then
+    echo "Refusing workspace outside the private root: ${AUTORESEARCH_WORKSPACE_ROOT:-unset}" >&2
+    exit 3
+fi
+if [[ "$(realpath "$repo_root")" != "$private_root/repo" ]]; then
+    echo "Refusing repository outside the private root: $repo_root" >&2
+    exit 3
+fi
+
+plan="$repo_root/config/multifidelity/dclm-140m-fork-to-zero-b3a-replication-v1.yaml"
+campaign_root="$private_root/runs/$campaign_name"
+log_path="$private_root/logs/${campaign_name}.log"
+tmux_socket="${AUTORESEARCH_TMUX_SOCKET:-$private_root/runtime/tmux.sock}"
+candidate_commit="b3a210ded839250e22eb148718fc9d401ec90052"
+parent_commit="0369584bf978a6850f96d29d3dc07fe00f32aaa9"
+
+required_paths=(
+    "$AUTORESEARCH_PYTHON"
+    "$LLMFOUNDRY_TORCHRUN"
+    "$DCLM_MODEL_PATH/tokenizer.json"
+    "$DCLM_CORE_PATH"
+    "$plan"
+    "$repo_root/tools/run-fork-to-zero-b3a-replication.py"
+)
+for gpu in 0 1; do
+    lane_root="$private_root/data-lanes/gpu${gpu}"
+    required_paths+=(
+        "$lane_root/$(basename "$DCLM_MDS_PATH")/corpus-manifest.json"
+        "$lane_root/$(basename "$DCLM_SCREEN_MDS_PATH")/holdout-split-manifest.json"
+        "$lane_root/$(basename "$DCLM_SCREEN_MDS_PATH")/validation/index.json"
+    )
+done
+for path in "${required_paths[@]}"; do
+    if [[ ! -e "$path" ]]; then
+        echo "Missing required path: $path" >&2
+        exit 3
+    fi
+    case "$(realpath "$path")" in
+        "$private_root"/*) ;;
+        *)
+            echo "Required path escapes the private root: $path" >&2
+            exit 3
+            ;;
+    esac
+done
+
+if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
+    echo "Refusing to use a dirty source checkout: $repo_root" >&2
+    exit 4
+fi
+git -C "$repo_root" cat-file -e "${candidate_commit}^{commit}"
+git -C "$repo_root" cat-file -e "${parent_commit}^{commit}"
+
+gpu_state="$(timeout 20 nvidia-smi \
+    --query-gpu=index,memory.used,utilization.gpu \
+    --format=csv,noheader,nounits -i 0,1)" || {
+    echo "Could not query GPUs 0 and 1 within 20 seconds" >&2
+    exit 6
+}
+busy=false
+while IFS=',' read -r observed_index memory_used utilization; do
+    observed_index="${observed_index//[[:space:]]/}"
+    memory_used="${memory_used//[[:space:]]/}"
+    utilization="${utilization//[[:space:]]/}"
+    echo "gpu${observed_index}: memory=${memory_used}MiB utilization=${utilization}%"
+    if (( memory_used > 1024 || utilization > 5 )); then
+        busy=true
+    fi
+done <<<"$gpu_state"
+
+if tmux -S "$tmux_socket" has-session -t "$session_name" 2>/dev/null; then
+    echo "Sequence session already exists: $session_name" >&2
+    exit 7
+fi
+
+"$AUTORESEARCH_PYTHON" "$repo_root/tools/run-fork-to-zero-b3a-replication.py" \
+    --repo "$repo_root" \
+    --campaign-root "$campaign_root" \
+    --plan "$plan" \
+    --dry-run >/dev/null
+
+commit="$(git -C "$repo_root" rev-parse HEAD)"
+echo "ready: harness=$commit campaign=$campaign_root"
+echo "protocol: candidate=$candidate_commit parent=$parent_commit seeds=31001-31006"
+echo "sequence: six paired waves, balanced GPU assignment, 12 total trajectories"
+if [[ "$start" != true ]]; then
+    if [[ "$busy" == true ]]; then
+        echo "validation passed, but at least one assigned GPU is busy"
+    else
+        echo "validation passed; add --start to launch $session_name"
+    fi
+    exit 0
+fi
+if [[ "$busy" == true ]]; then
+    echo "Refusing to start: GPUs 0 and 1 must both be idle" >&2
+    exit 6
+fi
+if [[ -e "$campaign_root/manifest.json" ]]; then
+    manifest_status="$($AUTORESEARCH_PYTHON - "$campaign_root/manifest.json" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], encoding="utf-8")).get("status", "unknown"))
+PY
+)"
+    if [[ "$manifest_status" == "running" || "$manifest_status" == "finished" ]]; then
+        echo "Refusing duplicate start; manifest status is $manifest_status" >&2
+        exit 7
+    fi
+fi
+
+mkdir -p \
+    "$campaign_root" \
+    "$(dirname "$log_path")" \
+    "$(dirname "$tmux_socket")" \
+    "$XDG_CACHE_HOME" \
+    "$XDG_CONFIG_HOME" \
+    "$XDG_DATA_HOME" \
+    "$TMPDIR"
+
+printf -v launch_command \
+    "cd %q && source %q && exec %q -u %q --repo %q --campaign-root %q --plan %q >>%q 2>&1" \
+    "$repo_root" \
+    "$runtime_env" \
+    "$AUTORESEARCH_PYTHON" \
+    "$repo_root/tools/run-fork-to-zero-b3a-replication.py" \
+    "$repo_root" \
+    "$campaign_root" \
+    "$plan" \
+    "$log_path"
+tmux -S "$tmux_socket" new-session -d -s "$session_name" "$launch_command"
+echo "started: tmux=$session_name log=$log_path"
