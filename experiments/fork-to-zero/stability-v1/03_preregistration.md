@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-21
 **Protocol version**: 1.0
-**Status**: Frozen for code review; launch commit to be filled after commit
+**Status**: Frozen at commit `273dbe49632ff7e6f1a9905f2c3d74b98bce410f`
 **Design**: `experiments/fork-to-zero/stability-v1/01_design.md`
 **Analysis**: `analysis/fork-to-zero-stability-v1/analyze.py`
 
