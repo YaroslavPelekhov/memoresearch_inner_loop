@@ -1,0 +1,284 @@
+{
+  "analysis_type": "exploratory_post_collection",
+  "campaigns": [
+    "fork-to-zero-mechanism-v1-gpu0",
+    "fork-to-zero-mechanism-v1-gpu1"
+  ],
+  "correlations": [
+    {
+      "commit_bootstrap_ci95_lower": 0.18013662976017505,
+      "commit_bootstrap_ci95_upper": 0.7878317710762222,
+      "n_unique_commits": 36,
+      "signal": "main_256",
+      "spearman_final": 0.5236674208649846
+    },
+    {
+      "commit_bootstrap_ci95_lower": 0.4162003939016679,
+      "commit_bootstrap_ci95_upper": 0.9079552252002969,
+      "n_unique_commits": 36,
+      "signal": "main_512",
+      "spearman_final": 0.7137521328156032
+    },
+    {
+      "commit_bootstrap_ci95_lower": 0.6909019694332631,
+      "commit_bootstrap_ci95_upper": 0.9206179417550946,
+      "n_unique_commits": 36,
+      "signal": "main_1024",
+      "spearman_final": 0.8489861620421595
+    },
+    {
+      "commit_bootstrap_ci95_lower": 0.7495187923327774,
+      "commit_bootstrap_ci95_upper": 0.969340257644517,
+      "n_unique_commits": 36,
+      "signal": "control_fitness",
+      "spearman_final": 0.8980432618182312
+    },
+    {
+      "commit_bootstrap_ci95_lower": 0.7661508968321648,
+      "commit_bootstrap_ci95_upper": 0.9694236820205033,
+      "n_unique_commits": 36,
+      "signal": "probe_fitness",
+      "spearman_final": 0.904531994335007
+    },
+    {
+      "commit_bootstrap_ci95_lower": -0.25418690537549227,
+      "commit_bootstrap_ci95_upper": 0.5246229885660767,
+      "n_unique_commits": 36,
+      "signal": "fork_effect",
+      "spearman_final": 0.13413143070403863
+    },
+    {
+      "commit_bootstrap_ci95_lower": -0.055446779733670216,
+      "commit_bootstrap_ci95_upper": 0.07449376100685047,
+      "n_unique_commits": 36,
+      "signal": "probe_minus_control_correlation",
+      "spearman_final": 0.00648873251677573
+    }
+  ],
+  "cross_campaign_model_commits": 35,
+  "eligible_experimental_runs": 47,
+  "eligible_runs_including_baselines": 49,
+  "exclusions": {
+    "all_trajectories": 52,
+    "baselines": 2,
+    "incomplete": 3
+  },
+  "experimental_lineages": 12,
+  "extreme_fork_effect_sensitivity": {
+    "control_fitness": 0.10312467773538209,
+    "excluded_commit": "b3a210ded839250e22eb148718fc9d401ec90052",
+    "final_fitness": 0.09723559211613819,
+    "fork_effect": -0.07298767492058603,
+    "fork_vs_control_gain_without_commit": {
+      "absolute_error_gain_ci95_lower": -4.185783263019249e-05,
+      "absolute_error_gain_ci95_upper": 2.6118768703595596e-05,
+      "absolute_error_gain_control_minus_fork": -6.0080314411611064e-06,
+      "campaign_squared_error_gain": {
+        "fork-to-zero-mechanism-v1-gpu0": -9.61252344866845e-08,
+        "fork-to-zero-mechanism-v1-gpu1": -1.6779479281997506e-08
+      },
+      "squared_error_gain_ci95_lower": -1.8642972165757553e-07,
+      "squared_error_gain_ci95_upper": 1.599064581371009e-10,
+      "squared_error_gain_control_minus_fork": -6.578715161430417e-08
+    },
+    "main_1024": 0.16397743670470943,
+    "model_comparison_without_commit": [
+      {
+        "features": "main_256;main_512;main_1024",
+        "mae": 0.0003356579874494096,
+        "n_commits": 34,
+        "prediction_spearman": 0.7849010674631572,
+        "ridge_l2": 1.0,
+        "rmse": 0.000566784212632244,
+        "variant": "trajectory"
+      },
+      {
+        "features": "main_256;main_512;main_1024;control_fitness",
+        "mae": 0.00030194104075897054,
+        "n_commits": 34,
+        "prediction_spearman": 0.8073661096977919,
+        "ridge_l2": 1.0,
+        "rmse": 0.0005033626823776343,
+        "variant": "trajectory_plus_control"
+      },
+      {
+        "features": "main_256;main_512;main_1024;probe_fitness",
+        "mae": 0.0003079490722001317,
+        "n_commits": 34,
+        "prediction_spearman": 0.7647283764769546,
+        "ridge_l2": 1.0,
+        "rmse": 0.0005649434853369948,
+        "variant": "trajectory_plus_fork_to_zero"
+      },
+      {
+        "features": "main_256;main_512;main_1024;control_fitness;probe_fitness",
+        "mae": 0.0003197777870954777,
+        "n_commits": 34,
+        "prediction_spearman": 0.7654924935597651,
+        "ridge_l2": 1.0,
+        "rmse": 0.0005332656054045891,
+        "variant": "trajectory_plus_both"
+      }
+    ],
+    "probe_fitness": 0.03013700281479606
+  },
+  "fork_effect": {
+    "effect_vs_future_gain_spearman": 0.21673101673101675,
+    "mean": 0.00011689246395635019,
+    "median": 0.002213794213536513,
+    "positive_fraction": 0.9722222222222222,
+    "probe_control_spearman": 0.9619593282592794,
+    "sd": 0.012532509176017259
+  },
+  "fork_vs_control_model_gain": {
+    "absolute_error_gain_ci95_lower": 7.857422375329459e-05,
+    "absolute_error_gain_ci95_upper": 0.0023948445730931174,
+    "absolute_error_gain_control_minus_fork": 0.0008730267074006251,
+    "campaign_squared_error_gain": {
+      "fork-to-zero-mechanism-v1-gpu0": 1.5900360992273678e-07,
+      "fork-to-zero-mechanism-v1-gpu1": 0.0002603930768983335
+    },
+    "squared_error_gain_ci95_lower": -1.6640527567815544e-07,
+    "squared_error_gain_ci95_upper": 0.0003127553897659054,
+    "squared_error_gain_control_minus_fork": 0.00010425263292528704
+  },
+  "incomplete_failure_audit": [
+    {
+      "campaign": "fork-to-zero-mechanism-v1-gpu1",
+      "commit": "3e4d68594abb98030745fcef4ed6f1e8645d8d47",
+      "error_type": "unknown_process_failure",
+      "last_budget": 256,
+      "nonfinite_batch": null,
+      "stage": "main/budget-512/wrapper.stderr.log",
+      "status": "train_failed"
+    },
+    {
+      "campaign": "fork-to-zero-mechanism-v1-gpu1",
+      "commit": "c842b9869feea1c74e615a4151e5c7fc436e7ac9",
+      "error_type": null,
+      "last_budget": 1024,
+      "nonfinite_batch": 1129,
+      "stage": "main/budget-2048/wrapper.stderr.log",
+      "status": "nonfinite_training_gradient"
+    },
+    {
+      "campaign": "fork-to-zero-mechanism-v1-gpu1",
+      "commit": "c842b9869feea1c74e615a4151e5c7fc436e7ac9",
+      "error_type": null,
+      "last_budget": 1024,
+      "nonfinite_batch": 1199,
+      "stage": "probes/budget-1024/wrapper.stderr.log",
+      "status": "nonfinite_training_gradient"
+    },
+    {
+      "campaign": "fork-to-zero-mechanism-v1-gpu1",
+      "commit": "3e936d2dbe9888af4b59f74840b00a9fbe8ece62",
+      "error_type": "cuda_oom",
+      "last_budget": 1024,
+      "nonfinite_batch": null,
+      "stage": "main/budget-2048/wrapper.stderr.log",
+      "status": "train_failed"
+    }
+  ],
+  "independent_campaigns": 2,
+  "inference_limit": "The 12 idea lineages form two sequential evolutionary campaigns. Repeated parent commits connect lineages within each campaign, so only two campaign-level clusters are independent. Commit/lineage bootstrap intervals are exploratory, not confirmatory.",
+  "model_comparison": [
+    {
+      "features": "main_256;main_512;main_1024",
+      "mae": 0.010174935122465211,
+      "n_commits": 35,
+      "prediction_spearman": -0.23870561569224383,
+      "ridge_l2": 1.0,
+      "rmse": 0.02161029955165995,
+      "variant": "trajectory"
+    },
+    {
+      "features": "main_256;main_512;main_1024;control_fitness",
+      "mae": 0.003171500980122339,
+      "n_commits": 35,
+      "prediction_spearman": -0.007424529126578007,
+      "ridge_l2": 1.0,
+      "rmse": 0.014092325221338927,
+      "variant": "trajectory_plus_control"
+    },
+    {
+      "features": "main_256;main_512;main_1024;probe_fitness",
+      "mae": 0.0022984742727217137,
+      "n_commits": 35,
+      "prediction_spearman": 0.10870631324951949,
+      "ridge_l2": 1.0,
+      "rmse": 0.009712929384006568,
+      "variant": "trajectory_plus_fork_to_zero"
+    },
+    {
+      "features": "main_256;main_512;main_1024;control_fitness;probe_fitness",
+      "mae": 0.002108912670241998,
+      "n_commits": 35,
+      "prediction_spearman": 0.29684107960790185,
+      "ridge_l2": 1.0,
+      "rmse": 0.00955651373302847,
+      "variant": "trajectory_plus_both"
+    }
+  ],
+  "plan_sha256": "45b548db5adcfae93dfe17f55dceebeeb93babdefa8dd422d940049c0fd5bd0e",
+  "repeatability": {
+    "max_replicates": 6,
+    "median_control_replicate_sd": 2.9741856073270525e-05,
+    "median_probe_replicate_sd": 1.3472145630443073e-05,
+    "repeated_commits": 4,
+    "repeated_runs": 15
+  },
+  "selection": {
+    "mean_control_fitness_pairwise_accuracy": 0.6907407407407408,
+    "mean_control_fitness_regret": 3.7043846399978375e-05,
+    "mean_control_fitness_reversal_accuracy": 0.10714285714285714,
+    "mean_control_fitness_top1_hit": 0.5,
+    "mean_main_1024_pairwise_accuracy": 0.8472222222222222,
+    "mean_main_1024_regret": 4.562352942658517e-06,
+    "mean_main_1024_reversal_accuracy": 0.0,
+    "mean_main_1024_top1_hit": 0.75,
+    "mean_probe_fitness_pairwise_accuracy": 0.7425925925925926,
+    "mean_probe_fitness_regret": 3.96512527598795e-05,
+    "mean_probe_fitness_reversal_accuracy": 0.15476190476190474,
+    "mean_probe_fitness_top1_hit": 0.4166666666666667,
+    "pairwise_accuracy_campaign_means": {
+      "fork-to-zero-mechanism-v1-gpu0": 0.06666666666666667,
+      "fork-to-zero-mechanism-v1-gpu1": 0.037037037037037035
+    },
+    "pairwise_accuracy_gain_lineage_bootstrap_ci95": [
+      -0.016666666666666663,
+      0.1199074074074074
+    ],
+    "pairwise_accuracy_gain_probe_minus_control": 0.05185185185185185,
+    "regret_campaign_means": {
+      "fork-to-zero-mechanism-v1-gpu0": -5.214812719802249e-06,
+      "fork-to-zero-mechanism-v1-gpu1": 0.0
+    },
+    "regret_gain_control_minus_probe": -2.6074063599011246e-06,
+    "regret_gain_lineage_bootstrap_ci95": [
+      -7.822219079703374e-06,
+      0.0
+    ],
+    "reversal_accuracy_campaign_means": {
+      "fork-to-zero-mechanism-v1-gpu0": 0.0,
+      "fork-to-zero-mechanism-v1-gpu1": 0.16666666666666666
+    },
+    "reversal_accuracy_gain_lineage_bootstrap_ci95": [
+      -0.17857142857142858,
+      0.2738095238095238
+    ],
+    "reversal_accuracy_gain_probe_minus_control": 0.047619047619047616,
+    "top1_hit_campaign_means": {
+      "fork-to-zero-mechanism-v1-gpu0": -0.16666666666666666,
+      "fork-to-zero-mechanism-v1-gpu1": 0.0
+    },
+    "top1_hit_gain_lineage_bootstrap_ci95": [
+      -0.25,
+      0.0
+    ],
+    "top1_hit_gain_probe_minus_control": -0.08333333333333333
+  },
+  "source_sha256": "87fdb420965264e3f7d20df0aa93f4e0f9e370444d149907f7bf682c653700fe",
+  "unique_experimental_commits": 36,
+  "verdict": "not supported for candidate ranking; possible instability stress-test signal"
+}
